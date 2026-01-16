@@ -49,16 +49,16 @@ public class RfidLoopRunner implements CommandLineRunner {
                 if (isScannerFatalError(e)) {
                     consecutiveScannerErrors++;
                     System.err.println(
-                            "[RFID] Scanner error " + consecutiveScannerErrors + "/5: " + safeMessage(msg)
-                    );
+                            "[RFID] Scanner error " + consecutiveScannerErrors + "/5: " + safeMessage(msg));
 
                     if (consecutiveScannerErrors >= 5) {
                         System.err.println(
-                                "[RFID] Too many consecutive scanner-level errors. " +
-                                        "Exiting helper so wrapper script can restart it."
-                        );
-                        // Let the .bat / service restart the process
-                        System.exit(2);
+                                "[RFID] No RFID reader detected after 5 attempts. " +
+                                        "Will retry in 30 seconds. OCR remains available.");
+                        // Don't exit - just sleep and reset counter so OCR keeps working
+                        consecutiveScannerErrors = 0;
+                        Thread.sleep(30_000); // Wait 30 seconds before retrying
+                        continue;
                     }
                 } else {
                     // Non-scanner error -> don't count towards restart
@@ -86,9 +86,12 @@ public class RfidLoopRunner implements CommandLineRunner {
         // Common cases:
         // - "No card terminals found" (your IllegalStateException)
         // - "list() failed" from PC/SC
-        if (msg.contains("no card terminals found")) return true;
-        if (msg.contains("list() failed")) return true;
-        if (msg.contains("scard") && msg.contains("error")) return true;
+        if (msg.contains("no card terminals found"))
+            return true;
+        if (msg.contains("list() failed"))
+            return true;
+        if (msg.contains("scard") && msg.contains("error"))
+            return true;
 
         return false;
     }

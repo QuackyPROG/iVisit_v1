@@ -1,4 +1,5 @@
 package com.ivisit.helper.utils;
+
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.awt.image.RescaleOp;
@@ -14,8 +15,7 @@ public class ImagePreprocessor {
     public static BufferedImage preprocess(BufferedImage input) {
         // 1. Convert to grayscale
         BufferedImage gray = new BufferedImage(
-                input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY
-        );
+                input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
         Graphics g = gray.getGraphics();
         g.drawImage(input, 0, 0, null);
         g.dispose();
@@ -24,8 +24,8 @@ public class ImagePreprocessor {
         RescaleOp rescale = new RescaleOp(1.5f, 0, null); // scaleFactor > 1 increases contrast
         BufferedImage contrasted = rescale.filter(gray, null);
 
-        // 3. Resize if width < 800px (helps OCR)
-        int targetWidth = Math.max(contrasted.getWidth(), 800);
+        // 3. Resize if width < 1200px (helps OCR - upgraded from 800px)
+        int targetWidth = Math.max(contrasted.getWidth(), 1200);
         int targetHeight = (int) ((double) contrasted.getHeight() / contrasted.getWidth() * targetWidth);
         BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_BYTE_GRAY);
         Graphics2D g2 = resized.createGraphics();
