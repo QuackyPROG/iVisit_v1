@@ -173,6 +173,55 @@ public class ImagePreprocessor {
         return resized;
     }
 
+    // ========== ROI CROPPING (Sprint 08) ==========
+
+    /**
+     * Crop a region from image using percentage coordinates.
+     * 
+     * @param image     Source image
+     * @param xPct      X position as percentage (0.0-1.0)
+     * @param yPct      Y position as percentage (0.0-1.0)
+     * @param widthPct  Width as percentage (0.0-1.0)
+     * @param heightPct Height as percentage (0.0-1.0)
+     * @return Cropped region as BufferedImage
+     */
+    public static BufferedImage cropRegion(BufferedImage image,
+            double xPct, double yPct,
+            double widthPct, double heightPct) {
+        int imgWidth = image.getWidth();
+        int imgHeight = image.getHeight();
+
+        // Convert percentages to pixels
+        int x = (int) (xPct * imgWidth);
+        int y = (int) (yPct * imgHeight);
+        int w = (int) (widthPct * imgWidth);
+        int h = (int) (heightPct * imgHeight);
+
+        // Clamp to image bounds
+        x = Math.max(0, Math.min(x, imgWidth - 1));
+        y = Math.max(0, Math.min(y, imgHeight - 1));
+        w = Math.min(w, imgWidth - x);
+        h = Math.min(h, imgHeight - y);
+
+        // Ensure minimum size
+        if (w < 10 || h < 10) {
+            return image; // Return original if crop is too small
+        }
+
+        return image.getSubimage(x, y, w, h);
+    }
+
+    /**
+     * Preprocess a cropped region for OCR.
+     * Uses binarization for best results on isolated text.
+     */
+    public static BufferedImage preprocessCroppedRegion(BufferedImage crop) {
+        BufferedImage gray = toGrayscale(crop);
+        BufferedImage sharpened = sharpen(gray);
+        BufferedImage binary = binarize(sharpened);
+        return resize(binary, Math.max(crop.getWidth() * 2, 400)); // Upscale for better OCR
+    }
+
     // ========== MULTI-PASS OCR VARIANTS (Sprint 06) ==========
 
     /**
@@ -223,5 +272,54 @@ public class ImagePreprocessor {
         }
 
         return inverted;
+    }
+
+    // ========== BINARIZATION (Sprint 08) ==========
+
+    /**
+     * Binarize image to pure black and white using Otsu threshold.
+     * This eliminates colored security patterns from ID cards.
+     */
+    private static BufferedImage binarize(BufferedImage gray) {
+        int threshold = calculateOtsuThreshold(gray);
+        int width = gray.getWidth();
+        int height = gray.getHeight();
+        BufferedImage binary = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int pixel = gray.getRaster().getSample(x, y, 0);
+                // Pixels above threshold become white (255), below become black (0)
+                int value = (pixel > threshold) ? 255 : 0;
+                binary.getRaster().setSample(x, y, 0, value);
+            }
+        }
+
+        return binary;
+    }
+
+    /**
+     * Binarized preprocessing for ID cards with colored security patterns.
+     * Converts to pure black/white to eliminate background noise.
+     */
+    public static BufferedImage preprocessBinarized(BufferedImage input) {
+        BufferedImage gray = toGrayscale(input);
+        BufferedImage sharpened = sharpen(gray);
+        BufferedImage binary = binarize(sharpened);
+
+        return resize(binary, 1200);
+    }
+
+    /**
+     * Aggressive binarization with inverted Otsu (for light text on dark
+     * backgrounds)
+     */
+    public static BufferedImage preprocessBinarizedInverted(BufferedImage input) {
+        BufferedImage gray = toGrayscale(input);
+        BufferedImage sharpened = sharpen(gray);
+        BufferedImage binary = binarize(sharpened);
+        BufferedImage inverted = invert(binary);
+
+        return resize(inverted, 1200);
     }
 }

@@ -94,6 +94,9 @@ public class OcrController {
         // Pass 3: Inverted for dark backgrounds
         results.add(runOcr(ImagePreprocessor.preprocessInverted(original), "inverted"));
 
+        // Pass 4: Binarized (pure black/white) to eliminate colored security patterns
+        results.add(runOcr(ImagePreprocessor.preprocessBinarized(original), "binarized"));
+
         // Select the best result
         OcrResult best = selectBest(results);
 

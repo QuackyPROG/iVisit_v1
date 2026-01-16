@@ -509,38 +509,79 @@ export function parseDriversLicense(text: string): ExtractedInfo {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const joined = text.replace(/\s+/g, ' ').trim();
 
-  // ID Number formats: N##-##-###### (old) or ###-##-###### (new)
-  const idMatch = joined.match(/[A-Z]?\d{2,3}-\d{2}-\d{6}/);
-  const idNumber = idMatch ? idMatch[0] : '';
+  // ID Number formats: N##-##-###### (standard LTO format)
+  let idNumber = '';
+  const idMatch = joined.match(/N?\d{2,3}[-\s]?\d{2}[-\s]?\d{5,6}/);
+  if (idMatch) {
+    // Normalize format - add dashes
+    const digits = idMatch[0].replace(/\D/g, '');
+    if (digits.length >= 10) {
+      idNumber = `N${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+    }
+  }
 
-  // Name: Look for labeled format or LASTNAME, FIRSTNAME
+  // Name: Look for "LASTNAME, FIRSTNAME" format (can have multi-word lastname like "DELA CRUZ, JUAN")
   let fullName = '';
 
-  // Try "LAST NAME" / "FIRST NAME" labels
-  const lastNameIdx = lines.findIndex(l => /last\s*name/i.test(l));
-  const firstNameIdx = lines.findIndex(l => /first\s*name|given/i.test(l));
-
-  if (lastNameIdx !== -1 && lastNameIdx + 1 < lines.length) {
-    const lastName = lines[lastNameIdx + 1];
-    let firstName = '';
-
-    if (firstNameIdx !== -1 && firstNameIdx + 1 < lines.length) {
-      firstName = lines[firstNameIdx + 1];
+  // Try matching multi-word lastname format: "DELA CRUZ, JUAN PEDRO GARCIA"
+  const nameMatch = joined.match(/([A-Z]{2,}(?:\s+[A-Z]{2,})*),\s*([A-Z]{2,}(?:\s+[A-Z]{2,})*)/);
+  if (nameMatch) {
+    const lastName = nameMatch[1].trim();
+    const firstName = nameMatch[2].trim();
+    // Exclude common labels
+    if (!/REPUBLIC|PHILIPPINES|TRANSPORTATION|LICENSE|PROFESSIONAL/i.test(lastName)) {
+      fullName = `${firstName} ${lastName}`;
     }
-
-    fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
   }
 
-  // Fallback: LASTNAME, FIRSTNAME pattern
+  // Second try: Look for ALL CAPS name with 3-5 words (Filipino names often have 4 parts)
   if (!fullName) {
-    const nameMatch = joined.match(/([A-Z][A-Z']+),\s*([A-Z][A-Z'\s]+)/);
-    if (nameMatch) {
-      fullName = `${nameMatch[2].trim()} ${nameMatch[1].trim()}`;
+    // Match pattern like "DELA CRUZ JUAN PEDRO GARCIA"
+    const allCapsLines = joined.match(/\b([A-Z]{3,}(?:\s+[A-Z]{3,}){2,4})\b/g) || [];
+    for (const candidate of allCapsLines) {
+      // Skip common header phrases
+      if (/REPUBLIC|PHILIPPINES|TRANSPORTATION|LICENSE|DRIVER|PROFESSIONAL|DEPARTMENT|OFFICE|NON-PROFESSIONAL/i.test(candidate)) {
+        continue;
+      }
+      // Found a good name candidate
+      fullName = candidate;
+      break;
     }
   }
 
-  // DOB
-  const dob = pickBestDob(joined);
+  // Third try: Search more aggressively for names near specific labels
+  if (!fullName) {
+    // Look for text after "Last Name First Name Middle Name" pattern
+    const afterLabels = joined.match(/(?:Last|First|Middle)\s*(?:Name|Nome)[^A-Z]*([A-Z]{3,}(?:\s+[A-Z]{3,}){2,4})/i);
+    if (afterLabels) {
+      fullName = afterLabels[1];
+    }
+  }
+
+  // Clean up any leading single chars (OCR noise like "f ")
+  if (fullName) {
+    fullName = fullName.replace(/^[a-z]\s+/i, '').trim();
+  }
+
+  // DOB - handle YYYY/MMDD format (no space between MM and DD)
+  let dob = '';
+  // Standard format: YYYY/MM/DD or YYYY-MM-DD
+  const dobMatch1 = joined.match(/\b(\d{4})[\/\-](\d{2})[\/\-](\d{2})\b/);
+  if (dobMatch1) {
+    dob = `${dobMatch1[1]}-${dobMatch1[2]}-${dobMatch1[3]}`;
+  }
+  // OCR error format: YYYY/MMDD (missing separator between MM and DD)
+  if (!dob) {
+    const dobMatch2 = joined.match(/\b(\d{4})[\/\-](\d{4})\b/);
+    if (dobMatch2) {
+      const mmdd = dobMatch2[2];
+      dob = `${dobMatch2[1]}-${mmdd.slice(0, 2)}-${mmdd.slice(2)}`;
+    }
+  }
+  // Fallback
+  if (!dob) {
+    dob = pickBestDob(joined);
+  }
 
   // Address
   const address = extractAddress(text);
@@ -560,26 +601,104 @@ export function parseDriversLicense(text: string): ExtractedInfo {
   };
 }
 
+
 // ========== SSS ID PARSER ==========
 
 export function parseSSSId(text: string): ExtractedInfo {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const joined = text.replace(/\s+/g, ' ').trim();
 
-  // ID Number: ##-#######-#
+  // ID Number: ##-#######-# (standard format)
+  let idNumber = '';
   const idMatch = joined.match(/\d{2}-\d{7}-\d/);
-  const idNumber = idMatch ? idMatch[0] : '';
-
-  // Name: LASTNAME, FIRSTNAME MI format
-  let fullName = '';
-  const nameMatch = joined.match(/([A-Z][A-Z']+),\s*([A-Z][A-Z'\s.]+)/);
-  if (nameMatch) {
-    fullName = `${nameMatch[2].trim()} ${nameMatch[1].trim()}`;
+  if (idMatch) {
+    idNumber = idMatch[0];
+  } else {
+    // Fallback: 9-10 digit number without dashes (OCR sometimes drops dashes)
+    const digitMatch = joined.match(/\b(\d{9,10})\b/);
+    if (digitMatch) {
+      const digits = digitMatch[1];
+      // Format as ##-#######-#
+      if (digits.length === 10) {
+        idNumber = `${digits.slice(0, 2)}-${digits.slice(2, 9)}-${digits.slice(9)}`;
+      } else if (digits.length === 9) {
+        // Missing leading zero, assume format 0#-#######-#
+        idNumber = `0${digits.slice(0, 1)}-${digits.slice(1, 8)}-${digits.slice(8)}`;
+      }
+    }
   }
 
-  // Fallback: look for name-like lines
+  // Name extraction for SSS cards
+  // Look for ALL CAPS name pattern like "HAMELTON RODRIGUEZ"
+  let fullName = '';
+
+  // First try: LASTNAME, FIRSTNAME format
+  const commaMatch = joined.match(/([A-Z][A-Z']+),\s*([A-Z][A-Z'\s.]+)/);
+  if (commaMatch) {
+    fullName = `${commaMatch[2].trim()} ${commaMatch[1].trim()}`;
+  }
+
+  // Second try: Find ALL CAPS name pattern directly in text (handles fragmented OCR)
   if (!fullName) {
-    fullName = pickBestNameLine(lines);
+    // Look for 2-3 consecutive ALL CAPS words (min 3 chars each)
+    const namePattern = joined.match(/\b([A-Z]{3,})\s+([A-Z]{3,})(?:\s+([A-Z]{3,}))?\b/);
+    if (namePattern) {
+      const candidate = namePattern[0];
+      // Make sure it's not a common label phrase
+      if (!/REPUBLIC|PHILIPPINES|SOCIAL|SECURITY|SYSTEM|PROUD|FILIPINO|PRESIDENT/i.test(candidate)) {
+        fullName = candidate;
+      }
+    }
+  }
+
+  // Third try: Find ALL CAPS name lines (2-4 words, not common labels)
+  if (!fullName) {
+    const excludePatterns = [
+      /REPUBLIC/i, /PHILIPPINES/i, /SOCIAL/i, /SECURITY/i, /SYSTEM/i,
+      /PRESIDENT/i, /PROUD/i, /FILIPINO/i, /SSS/i, /CORAZON/i, /DE LA PAZ/i
+    ];
+
+    for (const line of lines) {
+      // Clean words - remove trailing noise like '-y'
+      const cleanedWords = line.split(/\s+/)
+        .map(w => w.replace(/[^A-Z]/gi, ''))
+        .filter(w => w.length >= 3 && /^[A-Z]+$/i.test(w));
+
+      if (cleanedWords.length >= 2 && cleanedWords.length <= 4) {
+        const isAllCaps = cleanedWords.every(w => w === w.toUpperCase());
+        const candidateLine = cleanedWords.join(' ');
+        // Make sure it's not a common label
+        const isLabel = excludePatterns.some(p => p.test(candidateLine));
+        if (isAllCaps && !isLabel) {
+          fullName = candidateLine;
+          break;
+        }
+      }
+    }
+  }
+
+  // Third try: Look for name near the ID number in raw text
+  if (!fullName && idMatch) {
+    // Get text before the ID number, might contain name
+    const beforeId = joined.substring(0, joined.indexOf(idMatch[0]));
+    const nameCandidate = beforeId.match(/([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)\s*$/);
+    if (nameCandidate) {
+      fullName = nameCandidate[1];
+    }
+  }
+
+  // Clean up OCR noise - remove short words at start/end (like "ON", "I", "A", "l")
+  if (fullName) {
+    const words = fullName.split(/\s+/);
+    // Remove short leading words (1-2 chars that look like noise)
+    while (words.length > 2 && words[0].length <= 2) {
+      words.shift();
+    }
+    // Remove short trailing words
+    while (words.length > 2 && words[words.length - 1].length <= 2) {
+      words.pop();
+    }
+    fullName = words.join(' ');
   }
 
   // DOB

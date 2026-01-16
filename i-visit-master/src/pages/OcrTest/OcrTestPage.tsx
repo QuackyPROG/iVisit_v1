@@ -37,6 +37,7 @@ export default function OcrTestPage() {
     const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
     const [multipassResult, setMultipassResult] = useState<OcrResult | null>(null);
     const [parsedFields, setParsedFields] = useState<ExtractedInfo | null>(null);
+    const [visionResult, setVisionResult] = useState<{ fields: Record<string, string>; model: string } | null>(null);
     const [detectedType, setDetectedType] = useState<DetectedIdType | null>(null);
     const [selectedIdType, setSelectedIdType] = useState<string>('');
     const [isLoading, setIsLoading] = useState(false);
@@ -156,13 +157,49 @@ export default function OcrTestPage() {
                     score: multipassData.score,
                 });
 
-                // Auto-detect ID type
+                // Auto-detect ID type from multipass text
                 const detected = detectIdType(multipassData.extractedText || '');
                 setDetectedType(detected);
 
                 // Use selected type if provided, otherwise use detected type
                 const typeToUse = selectedIdType || detected.idType;
-                setParsedFields(parseTextByIdType(multipassData.extractedText || '', typeToUse));
+
+                // Try AI Vision OCR for better accuracy
+                try {
+                    const formData3 = new FormData();
+                    formData3.append('file', file);
+
+                    const visionRes = await fetch(`${HELPER_BASE_URL}/api/ocr/vision`, {
+                        method: 'POST',
+                        body: formData3,
+                    });
+                    const visionData = await visionRes.json();
+
+                    if (visionData.fields && !visionData.error) {
+                        // Use Vision results (more accurate)
+                        setVisionResult({
+                            fields: visionData.fields,
+                            model: visionData.model || 'unknown'
+                        });
+
+                        setParsedFields({
+                            fullName: visionData.fields.fullName || '',
+                            idNumber: visionData.fields.idNumber || '',
+                            dob: visionData.fields.dob || '',
+                            idType: visionData.fields.idType || typeToUse,
+                            address: visionData.fields.address || '',
+                        });
+                        console.log('Using AI Vision results');
+                    } else {
+                        // Fallback to Tesseract multipass parsing
+                        console.log('Vision failed, using Tesseract:', visionData.error);
+                        setParsedFields(parseTextByIdType(multipassData.extractedText || '', typeToUse));
+                    }
+                } catch (visionError) {
+                    // Fallback to Tesseract multipass parsing
+                    console.error('Vision OCR error:', visionError);
+                    setParsedFields(parseTextByIdType(multipassData.extractedText || '', typeToUse));
+                }
             } catch (error) {
                 console.error('OCR error:', error);
                 setOcrResult({ extractedText: `Error: ${error}` });
@@ -314,8 +351,8 @@ export default function OcrTestPage() {
                                 <span className="text-yellow-300 font-semibold">Detected Type:</span>
                                 <span className="text-white font-bold text-xl">{detectedType.idType}</span>
                                 <span className={`px-3 py-1 rounded-full text-sm font-semibold ${detectedType.confidence >= 0.9 ? 'bg-green-600 text-white' :
-                                        detectedType.confidence >= 0.7 ? 'bg-yellow-600 text-white' :
-                                            'bg-red-600 text-white'
+                                    detectedType.confidence >= 0.7 ? 'bg-yellow-600 text-white' :
+                                        'bg-red-600 text-white'
                                     }`}>
                                     {Math.round(detectedType.confidence * 100)}% confidence
                                 </span>
