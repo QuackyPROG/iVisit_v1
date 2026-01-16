@@ -9,6 +9,7 @@ import LogVisitor from '../pages/LogVisitor/LogVisitor';
 import ManagePasses from '../pages/ManagePasses/ManagePasses';
 import ArchiveCenter from '../pages/ArchiveCenter/ArchiveCenter';
 import DeviceSettings from '../pages/DeviceSettings/DeviceSettings';
+import OcrTestPage from '../pages/OcrTest/OcrTestPage';
 
 type Role = "admin" | "guard" | "support";
 
@@ -18,6 +19,18 @@ export interface DashboardRoute {
   path: string;
   element: React.ReactNode;
 }
+
+// Debug routes (only visible when VITE_OCR_DEBUG_MODE=true)
+const debugRoutes: DashboardRoute[] = import.meta.env.VITE_OCR_DEBUG_MODE === 'true'
+  ? [
+    {
+      type: ['admin'] as Role[],
+      label: 'OCR Test',
+      path: '/dashboard/ocr-test',
+      element: <OcrTestPage />,
+    },
+  ]
+  : [];
 
 const dashboardRoutes: DashboardRoute[] = [
   {
@@ -86,5 +99,8 @@ const dashboardRoutes: DashboardRoute[] = [
     path: '/dashboard/device-settings',
     element: <DeviceSettings />,
   },
+  // Add debug routes at the end
+  ...debugRoutes,
 ];
 export default dashboardRoutes;
+

@@ -1,9 +1,9 @@
 // src/utils/cardTemplates.ts
 
 // These are the ID types you already use in ScanIdPage / idParsers
-export type SupportedIdType = "National ID" | "PhilHealth ID" | "UMID";
+export type SupportedIdType = "National ID" | "PhilHealth ID" | "UMID" | "School ID";
 
-export type RoiKey = "fullName" | "dob" | "idNumber";
+export type RoiKey = "fullName" | "dob" | "idNumber" | "institution" | "faculty";
 
 export interface RoiSpec {
   key: RoiKey;
@@ -123,6 +123,49 @@ const TEMPLATES: CardTemplate[] = [
       },
     ],
   },
+  // UST School ID Template
+  {
+    idType: "School ID",
+    displayName: "School / University ID",
+    rois: [
+      {
+        key: "institution",
+        label: "University Name",
+        // Top area with university name
+        x: 0.20,
+        y: 0.02,
+        width: 0.75,
+        height: 0.12,
+      },
+      {
+        key: "fullName",
+        label: "Student Name",
+        // Name area (below photo)
+        x: 0.05,
+        y: 0.58,
+        width: 0.90,
+        height: 0.08,
+      },
+      {
+        key: "idNumber",
+        label: "Student ID",
+        // ID number below name
+        x: 0.05,
+        y: 0.66,
+        width: 0.50,
+        height: 0.06,
+      },
+      {
+        key: "faculty",
+        label: "Faculty / Department",
+        // Faculty area at bottom
+        x: 0.05,
+        y: 0.74,
+        width: 0.70,
+        height: 0.12,
+      },
+    ],
+  },
 ];
 
 /**
@@ -133,3 +176,4 @@ export function getTemplateForIdType(idType: string | null | undefined): CardTem
   const tpl = TEMPLATES.find((t) => t.idType === idType);
   return tpl || null;
 }
+

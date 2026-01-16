@@ -5,12 +5,124 @@ export interface ExtractedInfo {
   dob: string;
   idNumber: string;
   idType: string;
+  address?: string;
   confidence?: {
     fullName: number;
     dob: number;
     idNumber: number;
+    address?: number;
   };
 }
+
+export interface DetectedIdType {
+  idType: string;
+  confidence: number;
+  matchedPatterns: string[];
+}
+
+/**
+ * Auto-detect ID type based on patterns in OCR text
+ */
+export function detectIdType(text: string): DetectedIdType {
+  if (!text) {
+    return { idType: "Other", confidence: 0, matchedPatterns: [] };
+  }
+
+  const upper = text.toUpperCase();
+  const matchedPatterns: string[] = [];
+
+  // ========== NATIONAL ID (highest priority - has unique 4x4 ID format) ==========
+  const hasNationalIdNumber = /\d{4}-\d{4}-\d{4}-\d{4}/.test(text);
+  const hasPhilSys = /PHILSYS/i.test(text) || /PHILIPPINE\s*NATIONAL\s*ID/i.test(text);
+
+  if (hasNationalIdNumber) {
+    matchedPatterns.push("ID: XXXX-XXXX-XXXX-XXXX");
+    if (hasPhilSys || /REPUBLIKA\s*NG\s*PILIPINAS/i.test(text)) {
+      matchedPatterns.push("PhilSys / National ID");
+    }
+    return { idType: "National ID", confidence: 0.95, matchedPatterns };
+  }
+
+  // ========== UMID (check BEFORE SSS - has CRN or Multi-Purpose text) ==========
+  // Use looser patterns that work with noisy OCR
+  const hasCRN = /CRN[:\s\-]*\d{4}[\-\s]?\d{7}[\-\s]?\d/i.test(text);
+  const hasUMIDExact = /\bUMID\b/i.test(text);
+
+  // Looser patterns for noisy OCR - look for key phrases even when fragmented
+  const hasRepublicPhilippines = /REPUBLIC\s*OF\s*THE\s*PHILIPPINES/i.test(text) ||
+    upper.includes("REPUBLIC") && upper.includes("PHILIPPINES");
+  const hasMultiPurpose = /MULTI[-\s]?PURPOSE/i.test(text) ||
+    (upper.includes("MULTI") && upper.includes("PURPOSE"));
+  const hasUnified = /UNIFIED/i.test(text);
+
+  // If we see "REPUBLIC OF THE PHILIPPINES" + "MULTI-PURPOSE" or "UNIFIED", it's UMID
+  if (hasCRN || hasUMIDExact || (hasRepublicPhilippines && (hasMultiPurpose || hasUnified))) {
+    if (hasCRN) matchedPatterns.push("CRN-XXXX-XXXXXXX-X");
+    if (hasUMIDExact) matchedPatterns.push("UMID text found");
+    if (hasRepublicPhilippines) matchedPatterns.push("Republic of the Philippines");
+    if (hasMultiPurpose || hasUnified) matchedPatterns.push("Multi-Purpose ID text");
+    return { idType: "UMID", confidence: 0.95, matchedPatterns };
+  }
+
+  // ========== DRIVER'S LICENSE ==========
+  const hasLTOText = /LAND\s*TRANSPORTATION\s*OFFICE/i.test(text) ||
+    /\bLTO\b/.test(upper) ||
+    /DRIVER['']?S?\s*LICENSE/i.test(text) ||
+    /LICENSE\s*NO/i.test(text);
+  const hasLicenseNumber = /[A-Z]?\d{2,3}-\d{2}-\d{6}/.test(text);
+
+  if (hasLTOText || hasLicenseNumber) {
+    if (hasLTOText) matchedPatterns.push("LTO / Driver's License");
+    if (hasLicenseNumber) matchedPatterns.push("ID: N##-##-######");
+    return { idType: "Driver's License", confidence: 0.9, matchedPatterns };
+  }
+
+  // ========== PHILHEALTH ==========
+  const hasPhilHealth = /PHILHEALTH/i.test(text) ||
+    /PHILIPPINE\s*HEALTH\s*INSURANCE/i.test(text);
+  const hasPhilHealthNumber = /\d{2}-\d{9}-\d/.test(text);
+
+  if (hasPhilHealth || hasPhilHealthNumber) {
+    if (hasPhilHealth) matchedPatterns.push("PhilHealth");
+    if (hasPhilHealthNumber) matchedPatterns.push("ID: ##-#########-#");
+    return { idType: "PhilHealth ID", confidence: 0.9, matchedPatterns };
+  }
+
+  // ========== SSS (check AFTER UMID and PhilHealth) ==========
+  const hasSSSText = /SOCIAL\s*SECURITY\s*SYSTEM/i.test(text);
+  // Only match standalone SSS, not as part of other words
+  const hasSSSAbbrev = /\bSSS\b/.test(upper) && !/PHILSYS|UMID|MULTI.?PURPOSE/i.test(text);
+  const hasSSSNumber = /\d{2}-\d{7}-\d/.test(text);
+
+  if (hasSSSText || (hasSSSAbbrev && hasSSSNumber)) {
+    if (hasSSSText) matchedPatterns.push("Social Security System");
+    if (hasSSSNumber) matchedPatterns.push("ID: ##-#######-#");
+    return { idType: "SSS ID", confidence: 0.85, matchedPatterns };
+  }
+
+  // ========== CITY ID / BARANGAY ID ==========
+  if (/QUEZON\s*CITY/i.test(text) ||
+    /CITY\s*OF\s*MANILA/i.test(text) ||
+    /CITY\s*ID/i.test(text) ||
+    /BARANGAY\s*ID/i.test(text)) {
+    matchedPatterns.push("City/Barangay ID");
+    return { idType: "City ID", confidence: 0.8, matchedPatterns };
+  }
+
+  // ========== SCHOOL ID ==========
+  if (/UNIVERSITY/i.test(text) ||
+    /COLLEGE/i.test(text) ||
+    /STUDENT\s*ID/i.test(text) ||
+    /SCHOOL\s*ID/i.test(text)) {
+    matchedPatterns.push("School/University");
+    return { idType: "School ID", confidence: 0.7, matchedPatterns };
+  }
+
+  // Default
+  // Default
+  return { idType: "Other", confidence: 0.3, matchedPatterns: ["No patterns matched"] };
+}
+
 
 export function normalizeDate(dateStr: string): string {
   if (!dateStr) return "";
@@ -365,7 +477,179 @@ export function parseGeneric(text: string): ExtractedInfo {
   };
 }
 
-// Centralized parser function (note, might replace this in the future with a modular method?)
+// ========== ADDRESS EXTRACTION HELPER ==========
+
+function extractAddress(text: string): string {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  // Look for "ADDRESS" label
+  const addrIdx = lines.findIndex(l => /^address/i.test(l) || /\baddress\s*:/i.test(l));
+
+  if (addrIdx !== -1) {
+    // Take next 2-3 lines as address (skip the label line itself)
+    const addrLines = lines.slice(addrIdx + 1, addrIdx + 4)
+      .filter(l => !/(name|birth|sex|date|id|number|license|expiry)/i.test(l));
+
+    if (addrLines.length > 0) {
+      return addrLines.join(', ').replace(/\s+/g, ' ').trim();
+    }
+  }
+
+  // Fallback: look for common address patterns (Brgy, Street, City)
+  const addrPattern = lines.find(l =>
+    /(brgy|barangay|street|st\.|ave|avenue|city|metro|manila|quezon)/i.test(l)
+  );
+
+  return addrPattern || '';
+}
+
+// ========== DRIVER'S LICENSE PARSER ==========
+
+export function parseDriversLicense(text: string): ExtractedInfo {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const joined = text.replace(/\s+/g, ' ').trim();
+
+  // ID Number formats: N##-##-###### (old) or ###-##-###### (new)
+  const idMatch = joined.match(/[A-Z]?\d{2,3}-\d{2}-\d{6}/);
+  const idNumber = idMatch ? idMatch[0] : '';
+
+  // Name: Look for labeled format or LASTNAME, FIRSTNAME
+  let fullName = '';
+
+  // Try "LAST NAME" / "FIRST NAME" labels
+  const lastNameIdx = lines.findIndex(l => /last\s*name/i.test(l));
+  const firstNameIdx = lines.findIndex(l => /first\s*name|given/i.test(l));
+
+  if (lastNameIdx !== -1 && lastNameIdx + 1 < lines.length) {
+    const lastName = lines[lastNameIdx + 1];
+    let firstName = '';
+
+    if (firstNameIdx !== -1 && firstNameIdx + 1 < lines.length) {
+      firstName = lines[firstNameIdx + 1];
+    }
+
+    fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  }
+
+  // Fallback: LASTNAME, FIRSTNAME pattern
+  if (!fullName) {
+    const nameMatch = joined.match(/([A-Z][A-Z']+),\s*([A-Z][A-Z'\s]+)/);
+    if (nameMatch) {
+      fullName = `${nameMatch[2].trim()} ${nameMatch[1].trim()}`;
+    }
+  }
+
+  // DOB
+  const dob = pickBestDob(joined);
+
+  // Address
+  const address = extractAddress(text);
+
+  return {
+    fullName: fullName.replace(/\s+/g, ' ').trim(),
+    dob,
+    idNumber,
+    idType: "Driver's License",
+    address,
+    confidence: {
+      fullName: fullName ? 0.85 : 0.3,
+      dob: dob ? 0.8 : 0.3,
+      idNumber: idNumber ? 0.95 : 0.3,
+      address: address ? 0.7 : 0.2,
+    },
+  };
+}
+
+// ========== SSS ID PARSER ==========
+
+export function parseSSSId(text: string): ExtractedInfo {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const joined = text.replace(/\s+/g, ' ').trim();
+
+  // ID Number: ##-#######-#
+  const idMatch = joined.match(/\d{2}-\d{7}-\d/);
+  const idNumber = idMatch ? idMatch[0] : '';
+
+  // Name: LASTNAME, FIRSTNAME MI format
+  let fullName = '';
+  const nameMatch = joined.match(/([A-Z][A-Z']+),\s*([A-Z][A-Z'\s.]+)/);
+  if (nameMatch) {
+    fullName = `${nameMatch[2].trim()} ${nameMatch[1].trim()}`;
+  }
+
+  // Fallback: look for name-like lines
+  if (!fullName) {
+    fullName = pickBestNameLine(lines);
+  }
+
+  // DOB
+  const dob = pickBestDob(joined);
+
+  return {
+    fullName: fullName.replace(/\s+/g, ' ').trim(),
+    dob,
+    idNumber,
+    idType: "SSS ID",
+    confidence: {
+      fullName: fullName ? 0.85 : 0.3,
+      dob: dob ? 0.8 : 0.3,
+      idNumber: idNumber ? 0.95 : 0.3,
+    },
+  };
+}
+
+// ========== CITY ID / QC ID PARSER ==========
+
+export function parseCityId(text: string): ExtractedInfo {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const joined = text.replace(/\s+/g, ' ').trim();
+
+  // ID Number: Look for various patterns
+  // QC ID: QC-XXXXXXXXX or long digit sequences
+  let idNumber = '';
+
+  const qcMatch = joined.match(/QC-?\s*\d{6,}/i);
+  if (qcMatch) {
+    idNumber = qcMatch[0].replace(/\s/g, '');
+  } else {
+    // Generic: 8+ digit number
+    const digitMatch = joined.match(/\b\d{8,}\b/);
+    if (digitMatch) {
+      idNumber = digitMatch[0];
+    }
+  }
+
+  // Name
+  let fullName = '';
+  const nameMatch = joined.match(/([A-Z][A-Z']+),\s*([A-Z][A-Z'\s.]+)/);
+  if (nameMatch) {
+    fullName = `${nameMatch[2].trim()} ${nameMatch[1].trim()}`;
+  } else {
+    fullName = pickBestNameLine(lines);
+  }
+
+  // DOB
+  const dob = pickBestDob(joined);
+
+  // Address - city IDs usually have address
+  const address = extractAddress(text);
+
+  return {
+    fullName: fullName.replace(/\s+/g, ' ').trim(),
+    dob,
+    idNumber,
+    idType: "City ID",
+    address,
+    confidence: {
+      fullName: fullName ? 0.75 : 0.3,
+      dob: dob ? 0.7 : 0.3,
+      idNumber: idNumber ? 0.8 : 0.3,
+      address: address ? 0.7 : 0.2,
+    },
+  };
+}
+
+// Centralized parser function
 export function parseTextByIdType(text: string, idType: string): ExtractedInfo {
   switch (idType) {
     case "National ID":
@@ -374,7 +658,16 @@ export function parseTextByIdType(text: string, idType: string): ExtractedInfo {
       return parsePhilHealthId(text);
     case "UMID":
       return parseUMID(text);
+    case "Driver's License":
+      return parseDriversLicense(text);
+    case "SSS ID":
+      return parseSSSId(text);
+    case "City ID":
+    case "QC ID":
+    case "Other":
+      return parseCityId(text);
     default:
       return parseGeneric(text);
   }
 }
+

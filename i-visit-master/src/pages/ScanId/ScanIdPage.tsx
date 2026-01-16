@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useCookies } from "react-cookie";
 import Select from "../../components/common/Select";
@@ -7,6 +7,7 @@ import Modal from "../../components/common/Modal";
 import Button from "../../components/common/Button";
 import Meta from "../../utils/Meta";
 import { useToast } from "../../contexts/ToastContext";
+import ScanGuideOverlay from "../../components/ocr/ScanGuideOverlay";
 
 import { useCamera } from "../../hooks/useCamera";
 import { registerVisitor, getStationById, type Station } from "../../api/Index";
@@ -156,6 +157,9 @@ export default function ScanIdPage() {
   const [scanning, setScanning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Ref for camera container (for visual guide overlay)
+  const cameraContainerRef = useRef<HTMLDivElement>(null);
+
   // Camera hook for ID/OCR
   const {
     videoRef,
@@ -272,20 +276,20 @@ export default function ScanIdPage() {
 
       // 5. Merge ROI + full-card results
       function isReasonableName(candidate: string): boolean {
-  const trimmed = candidate.trim();
-  if (trimmed.length < 5) return false;
-  if (/name/i.test(trimmed)) return false;
-  if (!/\s/.test(trimmed)) return false; // require at least 2 tokens
-  return true;
-}
+        const trimmed = candidate.trim();
+        if (trimmed.length < 5) return false;
+        if (/name/i.test(trimmed)) return false;
+        if (!/\s/.test(trimmed)) return false; // require at least 2 tokens
+        return true;
+      }
 
-const useRoiName =
-  roiFullName && isReasonableName(roiFullName);
+      const useRoiName =
+        roiFullName && isReasonableName(roiFullName);
 
-const mergedFullName =
-  selectedIdType === "National ID"
-    ? fromFull.fullName || roiFullName || ""
-    : (useRoiName ? roiFullName : fromFull.fullName) || "";
+      const mergedFullName =
+        selectedIdType === "National ID"
+          ? fromFull.fullName || roiFullName || ""
+          : (useRoiName ? roiFullName : fromFull.fullName) || "";
       const mergedDob = roiDob || fromFull.dob || "";
       const mergedIdNumber = roiIdNumber || fromFull.idNumber || "";
       const mergedIdType = fromFull.idType || selectedIdType || "Unknown";
@@ -332,7 +336,7 @@ const mergedFullName =
       console.error(err);
       showToast(
         err?.message ||
-          "OCR failed — check helper connection and try again.",
+        "OCR failed — check helper connection and try again.",
         { variant: "error" }
       );
       setIsFrozen(false);
@@ -756,17 +760,19 @@ const mergedFullName =
               className="w-full max-w-md rounded-lg"
             />
           ) : (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              className="w-full max-w-md rounded-lg"
-            />
+            <div ref={cameraContainerRef} className="relative w-full max-w-md">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className="w-full rounded-lg"
+              />
+              <ScanGuideOverlay containerRef={cameraContainerRef} />
+            </div>
           )}
 
           <p className="text-xs text-gray-400 text-center">
-            Take a clear photo of the ID. You don&apos;t need to align it
-            perfectly; the system will detect and process the card.
+            Align the ID card within the yellow guide for best results.
           </p>
 
           <Button

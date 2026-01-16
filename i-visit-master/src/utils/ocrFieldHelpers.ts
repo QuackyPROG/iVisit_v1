@@ -7,7 +7,7 @@ import {
   normalizeDate,
 } from "./idParsers";
 
-export type IdFieldKey = "fullName" | "dob" | "idNumber";
+export type IdFieldKey = "fullName" | "dob" | "idNumber" | "institution" | "faculty";
 
 export interface FieldRoi {
   key: IdFieldKey;
@@ -107,6 +107,59 @@ export function extractDobFromText(text: string): string {
   return norm || "";
 }
 
+/**
+ * Fix common OCR character confusion errors (Sprint 03)
+ * Uses context to determine if a character should be a letter or number
+ */
+export function correctOcrMistakes(text: string): string {
+  if (!text) return "";
+
+  let result = text;
+
+  // In name contexts (mostly letters), fix number→letter substitutions
+  // Pattern: number surrounded by letters
+  result = result.replace(/([A-Za-z])0([A-Za-z])/g, '$1O$2'); // 0 → O
+  result = result.replace(/([A-Za-z])1([A-Za-z])/g, '$1I$2'); // 1 → I
+  result = result.replace(/([A-Za-z])5([A-Za-z])/g, '$1S$2'); // 5 → S
+  result = result.replace(/([A-Za-z])8([A-Za-z])/g, '$1B$2'); // 8 → B
+
+  // Leading/trailing fixes for names
+  result = result.replace(/^0([A-Za-z])/g, 'O$1');  // 0 at start
+  result = result.replace(/([A-Za-z])0$/g, '$1O');  // 0 at end
+  result = result.replace(/^1([A-Za-z])/g, 'I$1');  // 1 at start
+  result = result.replace(/([A-Za-z])1$/g, '$1I');  // 1 at end
+
+  return result;
+}
+
+/**
+ * Correct name-specific OCR errors (Sprint 03)
+ * More aggressive correction for name fields where we expect all letters
+ */
+export function correctNameOcr(name: string): string {
+  if (!name) return "";
+
+  // Names are typically all letters, so be more aggressive
+  let result = name
+    .replace(/0/g, 'O')   // All zeros become O
+    .replace(/1/g, 'I')   // All ones become I
+    .replace(/5/g, 'S')   // All fives become S (common: 5ANTOS → SANTOS)
+    .replace(/8/g, 'B');  // All eights become B
+
+  // Fix common Filipino name patterns
+  result = result
+    .replace(/DE1A/gi, 'DELA')
+    .replace(/DE L4/gi, 'DE LA')
+    .replace(/D3/gi, 'DE')
+    .replace(/CR[U0]Z/gi, 'CRUZ')
+    .replace(/5ANT[O0]S/gi, 'SANTOS')
+    .replace(/8A[U0]TISTA/gi, 'BAUTISTA')
+    .replace(/R[E3]Y[E3]S/gi, 'REYES')
+    .replace(/GARC1A/gi, 'GARCIA');
+
+  return result;
+}
+
 export function cleanRoiName(text: string): string {
   if (!text) return "";
 
@@ -127,6 +180,9 @@ export function cleanRoiName(text: string): string {
 
   // Compress spaces again
   cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+  // Apply character correction for names (Sprint 03)
+  cleaned = correctNameOcr(cleaned);
 
   return cleaned;
 }
