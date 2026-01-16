@@ -22,6 +22,7 @@ import {
   cleanRoiName,
   extractDobFromText,
   extractNationalIdNumber,
+  visionOcrExtract,
 } from "../../utils/ocrFieldHelpers";
 
 import { PURPOSE_OPTIONS } from "../../constants/purposeOptions";
@@ -204,12 +205,7 @@ export default function ScanIdPage() {
   const handleScanClick = async () => {
     if (scanning) return;
 
-    if (!selectedIdType) {
-      showToast("Please select an ID type before scanning.", {
-        variant: "warning",
-      });
-      return;
-    }
+    // Note: ID type selection is optional - Vision OCR can auto-detect
 
     setScanning(true);
 
@@ -274,7 +270,10 @@ export default function ScanIdPage() {
         idType: selectedIdType || "Unknown",
       };
 
-      // 5. Merge ROI + full-card results
+      // 4.5 Try AI Vision OCR for highest accuracy (OpenRouter)
+      const visionResult = await visionOcrExtract(finalDataUrl);
+
+      // 5. Merge ROI + full-card + Vision results (Vision takes priority if successful)
       function isReasonableName(candidate: string): boolean {
         const trimmed = candidate.trim();
         if (trimmed.length < 5) return false;
@@ -286,13 +285,24 @@ export default function ScanIdPage() {
       const useRoiName =
         roiFullName && isReasonableName(roiFullName);
 
-      const mergedFullName =
-        selectedIdType === "National ID"
+      // Priority: Vision > ROI > Full-card Tesseract
+      const mergedFullName = visionResult.success && visionResult.fullName
+        ? visionResult.fullName
+        : selectedIdType === "National ID"
           ? fromFull.fullName || roiFullName || ""
           : (useRoiName ? roiFullName : fromFull.fullName) || "";
-      const mergedDob = roiDob || fromFull.dob || "";
-      const mergedIdNumber = roiIdNumber || fromFull.idNumber || "";
-      const mergedIdType = fromFull.idType || selectedIdType || "Unknown";
+
+      const mergedDob = visionResult.success && visionResult.dob
+        ? visionResult.dob
+        : roiDob || fromFull.dob || "";
+
+      const mergedIdNumber = visionResult.success && visionResult.idNumber
+        ? visionResult.idNumber
+        : roiIdNumber || fromFull.idNumber || "";
+
+      const mergedIdType = visionResult.success && visionResult.idType
+        ? visionResult.idType
+        : fromFull.idType || selectedIdType || "Unknown";
 
       const hasUsefulData =
         mergedFullName.length > 0 ||
@@ -321,6 +331,17 @@ export default function ScanIdPage() {
       };
 
       setExtractedInfo(extended);
+
+      // Auto-update dropdowns if auto-detected
+      if (!selectedIdType && mergedIdType && mergedIdType !== "Unknown") {
+        setSelectedIdType(mergedIdType);
+      }
+
+      // Auto-update gender if detected by Vision
+      if (!selectedGender && visionResult.success && visionResult.gender) {
+        setSelectedGender(visionResult.gender);
+      }
+
       setManualData({
         fullName: mergedFullName,
         dob: mergedDob,
@@ -344,6 +365,137 @@ export default function ScanIdPage() {
       startCamera();
     } finally {
       setScanning(false);
+    }
+  };
+
+  // File input ref for Upload ID
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle file upload for ID images
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setScanning(true);
+
+    try {
+      // Convert file to data URL
+      const reader = new FileReader();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      // Show preview
+      setScanPreview(dataUrl);
+      setCroppedPreview(dataUrl);
+
+      // 1. Crop the card
+      const cropResult = await cropIdCardFromDataUrl(dataUrl);
+      const finalDataUrl = cropResult.success && cropResult.dataUrl ? cropResult.dataUrl : dataUrl;
+
+      // 2. Get ROIs and crop fields (if ID type selected)
+      const rois = getRoisForIdType(selectedIdType);
+      const fieldImages = await cropFieldsFromCard(finalDataUrl, rois);
+
+      let roiFullName = "";
+      let roiDob = "";
+      let roiIdNumber = "";
+
+      if (fieldImages.fullName) {
+        const text = await ocrDataUrlViaHelper(fieldImages.fullName);
+        roiFullName = cleanRoiName(text);
+      }
+      if (fieldImages.dob) {
+        const text = await ocrDataUrlViaHelper(fieldImages.dob);
+        roiDob = extractDobFromText(text);
+      }
+      if (fieldImages.idNumber) {
+        const text = await ocrDataUrlViaHelper(fieldImages.idNumber);
+        roiIdNumber = extractNationalIdNumber(text) || text.trim();
+      }
+
+      // 3. Full-card OCR
+      const parsedFromFull = await runWholeCardOcrAndParse(finalDataUrl, selectedIdType);
+      const fromFull: ExtractedInfo = parsedFromFull ?? {
+        fullName: "",
+        dob: "",
+        idNumber: "",
+        idType: selectedIdType || "Unknown",
+      };
+
+      // 4. Vision OCR - use ORIGINAL dataUrl to avoid crop issues
+      console.log('Calling Vision OCR with original image...');
+      const visionResult = await visionOcrExtract(dataUrl); // Changed from finalDataUrl to dataUrl
+      console.log('Vision OCR result:', visionResult);
+
+      // 5. Merge results (Vision > ROI > Tesseract)
+      const useRoiName = roiFullName && roiFullName.trim().length >= 5 && /\s/.test(roiFullName);
+
+      const mergedFullName = visionResult.success && visionResult.fullName
+        ? visionResult.fullName
+        : (useRoiName ? roiFullName : fromFull.fullName) || "";
+
+      const mergedDob = visionResult.success && visionResult.dob
+        ? visionResult.dob
+        : roiDob || fromFull.dob || "";
+
+      const mergedIdNumber = visionResult.success && visionResult.idNumber
+        ? visionResult.idNumber
+        : roiIdNumber || fromFull.idNumber || "";
+
+      const mergedIdType = visionResult.success && visionResult.idType
+        ? visionResult.idType
+        : fromFull.idType || selectedIdType || "Unknown";
+
+      const hasUsefulData = mergedFullName || mergedDob || mergedIdNumber;
+
+      if (!hasUsefulData) {
+        showToast("OCR couldn't extract details. Try a clearer image.", { variant: "error" });
+        setScanPreview(null);
+        return;
+      }
+
+      const extended: ExtendedExtractedInfo = {
+        fullName: mergedFullName,
+        dob: mergedDob,
+        idNumber: mergedIdNumber,
+        idType: mergedIdType,
+        purposeOfVisit: selectedPurpose || "Others",
+        visitorType: selectedVisitorType || "Guest / Visitor",
+        gender: selectedGender || "",
+      };
+
+      setExtractedInfo(extended);
+
+      // Auto-update dropdowns if auto-detected
+      if (!selectedIdType && mergedIdType && mergedIdType !== "Unknown") {
+        setSelectedIdType(mergedIdType);
+      }
+
+      // Auto-update gender if detected by Vision
+      if (!selectedGender && visionResult.success && visionResult.gender) {
+        setSelectedGender(visionResult.gender);
+      }
+
+      setManualData({
+        fullName: mergedFullName,
+        dob: mergedDob,
+        idNumber: mergedIdNumber,
+      });
+
+      setScanPreview(null);
+      showToast("ID extracted successfully!", { variant: "success" });
+
+    } catch (err: any) {
+      console.error(err);
+      showToast(err?.message || "OCR failed — try again.", { variant: "error" });
+      setScanPreview(null);
+    } finally {
+      setScanning(false);
+      // Reset file input
+      if (event.target) event.target.value = "";
     }
   };
 
@@ -542,16 +694,16 @@ export default function ScanIdPage() {
                 Manual Entry
               </Button>
               <Button
+                variation="secondary"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={scanning}
+              >
+                Upload ID
+              </Button>
+              <Button
                 variation="primary"
-                onClick={() => {
-                  if (!selectedIdType) {
-                    showToast("Please select an ID type first.", {
-                      variant: "warning",
-                    });
-                    return;
-                  }
-                  setIsCameraModalOpen(true);
-                }}
+                onClick={() => setIsCameraModalOpen(true)}
+                disabled={scanning}
               >
                 Open Camera
               </Button>
@@ -571,17 +723,17 @@ export default function ScanIdPage() {
           <div className="mt-4 flex md:hidden gap-3">
             <Button
               variation="primary"
-              onClick={() => {
-                if (!selectedIdType) {
-                  showToast("Please select an ID type first.", {
-                    variant: "warning",
-                  });
-                  return;
-                }
-                setIsCameraModalOpen(true);
-              }}
+              onClick={() => setIsCameraModalOpen(true)}
+              disabled={scanning}
             >
               Open Camera
+            </Button>
+            <Button
+              variation="secondary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={scanning}
+            >
+              Upload ID
             </Button>
             <Button
               variation="secondary"
@@ -590,6 +742,15 @@ export default function ScanIdPage() {
               Manual Entry
             </Button>
           </div>
+
+          {/* Hidden file input for Upload ID */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
         </div>
 
         <div className="bg-white/5 p-4 rounded-lg shadow-sm mt-4 space-y-2">

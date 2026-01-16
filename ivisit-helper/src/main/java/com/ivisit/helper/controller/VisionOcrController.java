@@ -46,14 +46,16 @@ public class VisionOcrController {
             String base64Image = encodeImageToBase64(file);
             String mimeType = file.getContentType() != null ? file.getContentType() : "image/jpeg";
 
-            // Build the prompt for ID extraction
+            // Build the prompt for ID extraction (including gender)
             String prompt = "Analyze this Philippine ID card image and extract the following information. " +
                     "Return ONLY a JSON object with these exact fields (use empty string if not found): " +
                     "{ \"fullName\": \"extracted full name\", \"idNumber\": \"extracted ID number\", " +
                     "\"dob\": \"date of birth in YYYY-MM-DD format\", \"address\": \"extracted address\", " +
-                    "\"idType\": \"type of ID (e.g. Driver's License, SSS ID, National ID, UMID)\" } " +
+                    "\"idType\": \"type of ID (e.g. Driver's License, SSS ID, National ID, UMID)\", " +
+                    "\"gender\": \"Male or Female based on SEX/M/F field on ID\" } " +
                     "Important: For names, use format FIRSTNAME MIDDLENAME LASTNAME. " +
                     "For dates, convert to YYYY-MM-DD format. " +
+                    "For gender, look for SEX field or M/F indicator and return 'Male' or 'Female'. " +
                     "Extract the ID/License number exactly as shown. Only return the JSON, no other text.";
 
             // Call OpenRouter API
@@ -186,7 +188,7 @@ public class VisionOcrController {
      */
     private Map<String, String> parseSimpleJson(String json) {
         Map<String, String> result = new HashMap<>();
-        String[] fields = { "fullName", "idNumber", "dob", "address", "idType" };
+        String[] fields = { "fullName", "idNumber", "dob", "address", "idType", "gender" };
 
         for (String field : fields) {
             String pattern = "\"" + field + "\"\\s*:\\s*\"([^\"]*)\"";

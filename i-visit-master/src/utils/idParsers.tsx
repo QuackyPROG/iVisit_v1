@@ -100,6 +100,31 @@ export function detectIdType(text: string): DetectedIdType {
     return { idType: "SSS ID", confidence: 0.85, matchedPatterns };
   }
 
+  // ========== PRC ID (Professional Regulation Commission) ==========
+  const hasPRC = /PROFESSIONAL\s*REGULATION\s*COMMISSION/i.test(text) ||
+    /\bPRC\b/.test(upper) ||
+    /LICENSE\s*REGISTRATION\s*NO/i.test(text);
+  const hasPRCNumber = /\d{7}/.test(text); // PRC uses 7-digit IDs
+
+  if (hasPRC) {
+    if (hasPRC) matchedPatterns.push("PRC ID");
+    if (hasPRCNumber) matchedPatterns.push("7-digit PRC number");
+    return { idType: "PRC ID", confidence: 0.85, matchedPatterns };
+  }
+
+  // ========== PHILIPPINE PASSPORT ==========
+  const hasPassport = /PASSPORT/i.test(text) ||
+    /REPUBLIKA\s*NG\s*PILIPINAS/i.test(text) ||
+    /DEPARTMENT\s*OF\s*FOREIGN\s*AFFAIRS/i.test(text) ||
+    /\bDFA\b/.test(upper);
+  const hasPassportNumber = /[A-Z]{1,2}\d{7}/.test(text); // e.g., P1234567 or AB1234567
+
+  if (hasPassport || hasPassportNumber) {
+    if (hasPassport) matchedPatterns.push("Philippine Passport");
+    if (hasPassportNumber) matchedPatterns.push("Passport number format");
+    return { idType: "Passport", confidence: 0.85, matchedPatterns };
+  }
+
   // ========== CITY ID / BARANGAY ID ==========
   if (/QUEZON\s*CITY/i.test(text) ||
     /CITY\s*OF\s*MANILA/i.test(text) ||
@@ -118,7 +143,6 @@ export function detectIdType(text: string): DetectedIdType {
     return { idType: "School ID", confidence: 0.7, matchedPatterns };
   }
 
-  // Default
   // Default
   return { idType: "Other", confidence: 0.3, matchedPatterns: ["No patterns matched"] };
 }

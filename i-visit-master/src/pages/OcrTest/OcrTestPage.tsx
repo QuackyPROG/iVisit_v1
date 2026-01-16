@@ -103,7 +103,43 @@ export default function OcrTestPage() {
 
             // Use selected type if provided, otherwise use detected type
             const typeToUse = selectedIdType || detected.idType;
-            setParsedFields(parseTextByIdType(multipassData.extractedText || '', typeToUse));
+
+            // Try AI Vision OCR for better accuracy
+            try {
+                const formData3 = new FormData();
+                formData3.append('file', file);
+
+                const visionRes = await fetch(`${HELPER_BASE_URL}/api/ocr/vision`, {
+                    method: 'POST',
+                    body: formData3,
+                });
+                const visionData = await visionRes.json();
+
+                if (visionData.fields && !visionData.error) {
+                    // Use Vision results (more accurate)
+                    setVisionResult({
+                        fields: visionData.fields,
+                        model: visionData.model || 'unknown'
+                    });
+
+                    setParsedFields({
+                        fullName: visionData.fields.fullName || '',
+                        idNumber: visionData.fields.idNumber || '',
+                        dob: visionData.fields.dob || '',
+                        idType: visionData.fields.idType || typeToUse,
+                        address: visionData.fields.address || '',
+                    });
+                    console.log('Using AI Vision results (camera)');
+                } else {
+                    // Fallback to Tesseract multipass parsing
+                    console.log('Vision failed, using Tesseract:', visionData.error);
+                    setParsedFields(parseTextByIdType(multipassData.extractedText || '', typeToUse));
+                }
+            } catch (visionError) {
+                // Fallback to Tesseract multipass parsing
+                console.error('Vision OCR error:', visionError);
+                setParsedFields(parseTextByIdType(multipassData.extractedText || '', typeToUse));
+            }
 
         } catch (error) {
             console.error('OCR error:', error);
@@ -372,7 +408,7 @@ export default function OcrTestPage() {
                 {/* Parsed ID Fields - RED styling as requested */}
                 {parsedFields && (
                     <div className="mt-6 bg-red-900/20 border border-red-500 rounded-lg p-4">
-                        <h3 className="text-red-400 font-bold mb-3 text-lg">📋 Parsed ID Fields ({parsedFields.idType})</h3>
+                        <h3 className="text-red-400 font-bold mb-3 text-lg">Parsed ID Fields ({parsedFields.idType})</h3>
                         <div className="space-y-2">
                             <div className="flex">
                                 <span className="text-red-300 font-semibold w-32">Full Name:</span>

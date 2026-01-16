@@ -24,7 +24,7 @@ export interface DashboardRoute {
 const debugRoutes: DashboardRoute[] = import.meta.env.VITE_OCR_DEBUG_MODE === 'true'
   ? [
     {
-      type: ['admin'] as Role[],
+      type: [] as Role[],
       label: 'OCR Test',
       path: '/dashboard/ocr-test',
       element: <OcrTestPage />,

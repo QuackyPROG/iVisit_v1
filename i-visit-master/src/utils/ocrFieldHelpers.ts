@@ -218,3 +218,75 @@ export function getRoisForIdType(idType: string): FieldRoi[] {
     height: r.height,
   }));
 }
+
+// ========== AI VISION OCR (OpenRouter via Helper) ==========
+
+const HELPER_BASE_URL = import.meta.env.VITE_HELPER_BASE_URL || 'http://localhost:8765';
+
+export interface VisionExtractResult {
+  fullName: string;
+  idNumber: string;
+  dob: string;
+  address: string;
+  idType: string;
+  gender: string;
+  success: boolean;
+}
+
+/**
+ * Call AI Vision OCR (OpenRouter via helper) for accurate ID extraction.
+ * @param dataUrl Base64 image data URL
+ * @returns Extracted fields or empty result on failure
+ */
+export async function visionOcrExtract(dataUrl: string): Promise<VisionExtractResult> {
+  const emptyResult: VisionExtractResult = {
+    fullName: '',
+    idNumber: '',
+    dob: '',
+    address: '',
+    idType: '',
+    gender: '',
+    success: false,
+  };
+
+  try {
+    // Convert data URL to blob/file
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    const file = new File([blob], 'id-card.png', { type: 'image/png' });
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const visionRes = await fetch(`${HELPER_BASE_URL}/api/ocr/vision`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!visionRes.ok) {
+      console.warn('Vision OCR request failed:', visionRes.status);
+      return emptyResult;
+    }
+
+    const visionData = await visionRes.json();
+
+    if (visionData.fields && !visionData.error) {
+      console.log('Vision OCR success:', visionData.fields);
+      return {
+        fullName: visionData.fields.fullName || '',
+        idNumber: visionData.fields.idNumber || '',
+        dob: visionData.fields.dob || '',
+        address: visionData.fields.address || '',
+        idType: visionData.fields.idType || '',
+        gender: visionData.fields.gender || '',
+        success: true,
+      };
+    }
+
+    console.warn('Vision OCR returned no fields:', visionData.error);
+    return emptyResult;
+  } catch (err) {
+    console.error('Vision OCR error:', err);
+    return emptyResult;
+  }
+}
