@@ -75,30 +75,36 @@ export async function cropFieldsFromCard(
 export function extractNationalIdNumber(text: string): string {
   if (!text) return "";
 
-  // Normalize some common OCR mistakes and whitespace
   let cleaned = text
     .replace(/O/g, "0")
     .replace(/[Il]/g, "1")
     .replace(/\s+/g, " ")
     .trim();
 
-  // Look for a pattern like 1234-5678-9012-3456 (allow spaces around dashes)
-  const match = cleaned.match(
+  const cleaned12 = cleaned.replace(/PSN[-–\s]*/gi, '');
+  const match12 = cleaned12.match(
+    /(\d{4})[-–\s]*(\d{3,4})[-–\s]*(\d{4})[-–\s]*(\d{1,4})/
+  );
+  if (match12) {
+    return `${match12[1]}-${match12[2]}-${match12[3]}-${match12[4]}`;
+  }
+
+  const match16 = cleaned.match(
     /\b\d{4}\s*-\s*\d{4}\s*-\s*\d{4}\s*-\s*\d{4}\b/
   );
-  if (!match) return "";
+  if (match16) {
+    const digits = match16[0].replace(/\D+/g, "");
+    if (digits.length === 16) {
+      return [
+        digits.slice(0, 4),
+        digits.slice(4, 8),
+        digits.slice(8, 12),
+        digits.slice(12),
+      ].join("-");
+    }
+  }
 
-  // Strip non-digits and ensure we really have 16 digits
-  const digits = match[0].replace(/\D+/g, "");
-  if (digits.length !== 16) return "";
-
-  // Return canonical format
-  return [
-    digits.slice(0, 4),
-    digits.slice(4, 8),
-    digits.slice(8, 12),
-    digits.slice(12),
-  ].join("-");
+  return "";
 }
 
 export function extractDobFromText(text: string): string {
@@ -107,46 +113,83 @@ export function extractDobFromText(text: string): string {
   return norm || "";
 }
 
-/**
- * Fix common OCR character confusion errors (Sprint 03)
- * Uses context to determine if a character should be a letter or number
- */
+export function extractPhilHealthIdNumber(text: string): string {
+  if (!text) return "";
+
+  let cleaned = text
+    .replace(/O/gi, "0")
+    .replace(/[Il]/g, "1")
+    .replace(/S/gi, "5")
+    .replace(/B/gi, "8")
+    .replace(/\s+/g, "")
+    .trim();
+
+  const match = cleaned.match(/(\d{2})\s*-?\s*(\d{9})\s*-?\s*(\d{1})/);
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  if (digitsOnly.length >= 12) {
+    const d = digitsOnly.slice(0, 12);
+    return `${d.slice(0, 2)}-${d.slice(2, 11)}-${d.slice(11)}`;
+  }
+
+  return cleaned.replace(/[^\d-]/g, "");
+}
+
+export function extractSssIdNumber(text: string): string {
+  if (!text) return "";
+
+  let cleaned = text
+    .replace(/O/gi, "0")
+    .replace(/[Il]/g, "1")
+    .replace(/S/gi, "5")
+    .replace(/B/gi, "8")
+    .replace(/\s+/g, "")
+    .trim();
+
+  const match = cleaned.match(/(\d{2})\s*-?\s*(\d{7})\s*-?\s*(\d{1})/);
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  if (digitsOnly.length >= 10) {
+    const d = digitsOnly.slice(0, 10);
+    return `${d.slice(0, 2)}-${d.slice(2, 9)}-${d.slice(9)}`;
+  }
+
+  return cleaned.replace(/[^\d-]/g, "");
+}
+
 export function correctOcrMistakes(text: string): string {
   if (!text) return "";
 
   let result = text;
 
-  // In name contexts (mostly letters), fix number→letter substitutions
-  // Pattern: number surrounded by letters
-  result = result.replace(/([A-Za-z])0([A-Za-z])/g, '$1O$2'); // 0 → O
-  result = result.replace(/([A-Za-z])1([A-Za-z])/g, '$1I$2'); // 1 → I
-  result = result.replace(/([A-Za-z])5([A-Za-z])/g, '$1S$2'); // 5 → S
-  result = result.replace(/([A-Za-z])8([A-Za-z])/g, '$1B$2'); // 8 → B
+  result = result.replace(/([A-Za-z])0([A-Za-z])/g, '$1O$2');
+  result = result.replace(/([A-Za-z])1([A-Za-z])/g, '$1I$2');
+  result = result.replace(/([A-Za-z])5([A-Za-z])/g, '$1S$2');
+  result = result.replace(/([A-Za-z])8([A-Za-z])/g, '$1B$2');
 
-  // Leading/trailing fixes for names
-  result = result.replace(/^0([A-Za-z])/g, 'O$1');  // 0 at start
-  result = result.replace(/([A-Za-z])0$/g, '$1O');  // 0 at end
-  result = result.replace(/^1([A-Za-z])/g, 'I$1');  // 1 at start
-  result = result.replace(/([A-Za-z])1$/g, '$1I');  // 1 at end
+  result = result.replace(/^0([A-Za-z])/g, 'O$1');
+  result = result.replace(/([A-Za-z])0$/g, '$1O');
+  result = result.replace(/^1([A-Za-z])/g, 'I$1');
+  result = result.replace(/([A-Za-z])1$/g, '$1I');
 
   return result;
 }
 
-/**
- * Correct name-specific OCR errors (Sprint 03)
- * More aggressive correction for name fields where we expect all letters
- */
 export function correctNameOcr(name: string): string {
   if (!name) return "";
 
-  // Names are typically all letters, so be more aggressive
   let result = name
-    .replace(/0/g, 'O')   // All zeros become O
-    .replace(/1/g, 'I')   // All ones become I
-    .replace(/5/g, 'S')   // All fives become S (common: 5ANTOS → SANTOS)
-    .replace(/8/g, 'B');  // All eights become B
+    .replace(/0/g, 'O')
+    .replace(/1/g, 'I')
+    .replace(/5/g, 'S')
+    .replace(/8/g, 'B');
 
-  // Fix common Filipino name patterns
   result = result
     .replace(/DE1A/gi, 'DELA')
     .replace(/DE L4/gi, 'DE LA')
@@ -233,11 +276,6 @@ export interface VisionExtractResult {
   success: boolean;
 }
 
-/**
- * Call AI Vision OCR (OpenRouter via helper) for accurate ID extraction.
- * @param dataUrl Base64 image data URL
- * @returns Extracted fields or empty result on failure
- */
 export async function visionOcrExtract(dataUrl: string): Promise<VisionExtractResult> {
   const emptyResult: VisionExtractResult = {
     fullName: '',
@@ -250,7 +288,6 @@ export async function visionOcrExtract(dataUrl: string): Promise<VisionExtractRe
   };
 
   try {
-    // Convert data URL to blob/file
     const response = await fetch(dataUrl);
     const blob = await response.blob();
     const file = new File([blob], 'id-card.png', { type: 'image/png' });
@@ -258,35 +295,66 @@ export async function visionOcrExtract(dataUrl: string): Promise<VisionExtractRe
     const formData = new FormData();
     formData.append('file', file);
 
+    console.log('[OCR] Trying OpenRouter Vision...');
     const visionRes = await fetch(`${HELPER_BASE_URL}/api/ocr/vision`, {
       method: 'POST',
       body: formData,
     });
 
-    if (!visionRes.ok) {
-      console.warn('Vision OCR request failed:', visionRes.status);
-      return emptyResult;
+    if (visionRes.ok) {
+      const visionData = await visionRes.json();
+
+      if (visionData.fields && !visionData.error) {
+        console.log('[OCR] OpenRouter Vision success:', visionData.fields);
+        return {
+          fullName: visionData.fields.fullName || '',
+          idNumber: visionData.fields.idNumber || '',
+          dob: visionData.fields.dob || '',
+          address: visionData.fields.address || '',
+          idType: visionData.fields.idType || '',
+          gender: visionData.fields.gender || '',
+          success: true,
+        };
+      }
+      console.warn('[OCR] OpenRouter returned no fields:', visionData.error);
+    } else {
+      console.warn('[OCR] OpenRouter request failed:', visionRes.status);
     }
 
-    const visionData = await visionRes.json();
+    console.log('[OCR] Trying OCR.space fallback...');
+    const formData2 = new FormData();
+    formData2.append('file', file);
 
-    if (visionData.fields && !visionData.error) {
-      console.log('Vision OCR success:', visionData.fields);
-      return {
-        fullName: visionData.fields.fullName || '',
-        idNumber: visionData.fields.idNumber || '',
-        dob: visionData.fields.dob || '',
-        address: visionData.fields.address || '',
-        idType: visionData.fields.idType || '',
-        gender: visionData.fields.gender || '',
-        success: true,
-      };
+    const ocrSpaceRes = await fetch(`${HELPER_BASE_URL}/api/ocr/ocrspace`, {
+      method: 'POST',
+      body: formData2,
+    });
+
+    if (ocrSpaceRes.ok) {
+      const ocrSpaceData = await ocrSpaceRes.json();
+
+      if (ocrSpaceData.success && ocrSpaceData.fields) {
+        console.log('[OCR] OCR.space success:', ocrSpaceData.fields);
+        return {
+          fullName: ocrSpaceData.fields.fullName || '',
+          idNumber: ocrSpaceData.fields.idNumber || '',
+          dob: ocrSpaceData.fields.dob || '',
+          address: ocrSpaceData.fields.address || '',
+          idType: ocrSpaceData.fields.idType || '',
+          gender: '',
+          success: true,
+        };
+      }
+      console.warn('[OCR] OCR.space returned no fields');
+    } else {
+      console.warn('[OCR] OCR.space request failed:', ocrSpaceRes.status);
     }
 
-    console.warn('Vision OCR returned no fields:', visionData.error);
+    console.warn('[OCR] All OCR methods failed, falling back to Tesseract');
     return emptyResult;
   } catch (err) {
-    console.error('Vision OCR error:', err);
+    console.error('[OCR] Error:', err);
     return emptyResult;
   }
 }
+

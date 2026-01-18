@@ -24,7 +24,11 @@ export function useCamera() {
 
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'environment', // Prefer back camera on mobile
+        },
       });
 
       // If a newer startCamera() has been called or stopCamera() ran,

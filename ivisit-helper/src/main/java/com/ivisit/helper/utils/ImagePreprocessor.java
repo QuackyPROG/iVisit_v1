@@ -8,34 +8,72 @@ import java.awt.image.RescaleOp;
 
 /**
  * Image preprocessing for OCR accuracy improvement.
- * Pipeline: Grayscale → Sharpen → Adaptive Contrast → Resize
+ * Enhanced pipeline with advanced techniques for better text extraction.
+ *
+ * Pipeline: Denoise → Grayscale → Sharpen → Adaptive Contrast → Binarize →
+ * Resize
  */
 public class ImagePreprocessor {
 
-    /**
-     * Main preprocessing pipeline for OCR accuracy:
-     * 1. Convert to grayscale
-     * 2. Apply sharpening filter (Sprint 02)
-     * 3. Adaptive contrast using Otsu threshold (Sprint 04)
-     * 4. Resize to minimum 1200px width (Sprint 01)
-     */
+    // Target resolution for OCR (higher = better accuracy but slower)
+    private static final int TARGET_WIDTH = 1600;
+
     public static BufferedImage preprocess(BufferedImage input) {
-        // 1. Convert to grayscale
-        BufferedImage gray = toGrayscale(input);
-
-        // 2. Apply sharpening to enhance edges (Sprint 02)
+        BufferedImage upscaled = upscaleIfNeeded(input, TARGET_WIDTH);
+        BufferedImage denoised = denoise(upscaled);
+        BufferedImage gray = toGrayscale(denoised);
         BufferedImage sharpened = sharpen(gray);
-
-        // 3. Adaptive contrast using Otsu threshold (Sprint 04)
         BufferedImage contrasted = adaptiveContrast(sharpened);
-
-        // 4. Resize if width < 1200px (Sprint 01)
-        return resize(contrasted, 1200);
+        return resize(contrasted, TARGET_WIDTH);
     }
 
-    /**
-     * Convert image to grayscale
-     */
+    private static BufferedImage upscaleIfNeeded(BufferedImage input, int targetWidth) {
+        if (input.getWidth() >= targetWidth) {
+            return input;
+        }
+
+        double scale = (double) targetWidth / input.getWidth();
+        int newWidth = targetWidth;
+        int newHeight = (int) (input.getHeight() * scale);
+
+        BufferedImage upscaled = new BufferedImage(newWidth, newHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2 = upscaled.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.drawImage(input, 0, 0, newWidth, newHeight, null);
+        g2.dispose();
+
+        return upscaled;
+    }
+
+    private static BufferedImage denoise(BufferedImage input) {
+        // Light 3x3 averaging kernel (less aggressive to preserve edges)
+        float weight = 1.0f / 9.0f;
+        float[] kernel = {
+                weight, weight, weight,
+                weight, weight, weight,
+                weight, weight, weight
+        };
+        Kernel blurKernel = new Kernel(3, 3, kernel);
+
+        BufferedImage rgb = toRGB(input);
+        ConvolveOp op = new ConvolveOp(blurKernel, ConvolveOp.EDGE_NO_OP, null);
+
+        return op.filter(rgb, null);
+    }
+
+    private static BufferedImage toRGB(BufferedImage input) {
+        if (input.getType() == BufferedImage.TYPE_INT_RGB) {
+            return input;
+        }
+        BufferedImage rgb = new BufferedImage(input.getWidth(), input.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics g = rgb.getGraphics();
+        g.drawImage(input, 0, 0, null);
+        g.dispose();
+        return rgb;
+    }
+
     private static BufferedImage toGrayscale(BufferedImage input) {
         BufferedImage gray = new BufferedImage(
                 input.getWidth(), input.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
@@ -45,50 +83,32 @@ public class ImagePreprocessor {
         return gray;
     }
 
-    /**
-     * Apply 3x3 sharpening kernel to enhance text edges.
-     * Uses Laplacian kernel for edge enhancement.
-     */
     private static BufferedImage sharpen(BufferedImage image) {
-        // 3x3 Laplacian sharpening kernel
+        // 3x3 Laplacian sharpening kernel (stronger)
         float[] kernel = {
-                0, -1, 0,
-                -1, 5, -1,
-                0, -1, 0
+                -0.5f, -1, -0.5f,
+                -1, 7, -1,
+                -0.5f, -1, -0.5f
         };
         Kernel sharpenKernel = new Kernel(3, 3, kernel);
 
-        // ConvolveOp requires RGB image, convert temporarily
         BufferedImage rgb = new BufferedImage(
                 image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
         Graphics2D gRgb = rgb.createGraphics();
         gRgb.drawImage(image, 0, 0, null);
         gRgb.dispose();
 
-        // Apply convolution
         ConvolveOp op = new ConvolveOp(sharpenKernel, ConvolveOp.EDGE_NO_OP, null);
         BufferedImage sharpened = op.filter(rgb, null);
 
-        // Convert back to grayscale
-        BufferedImage gray = new BufferedImage(
-                sharpened.getWidth(), sharpened.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
-        Graphics g = gray.getGraphics();
-        g.drawImage(sharpened, 0, 0, null);
-        g.dispose();
-
-        return gray;
+        return toGrayscale(sharpened);
     }
 
-    /**
-     * Calculate optimal threshold using Otsu's method (Sprint 04)
-     * Finds threshold that minimizes intra-class variance
-     */
     private static int calculateOtsuThreshold(BufferedImage gray) {
         int width = gray.getWidth();
         int height = gray.getHeight();
         int[] histogram = new int[256];
 
-        // Build histogram
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int pixel = gray.getRaster().getSample(x, y, 0);
@@ -106,7 +126,7 @@ public class ImagePreprocessor {
         int wB = 0;
         int wF;
         float maxVariance = 0;
-        int threshold = 128; // Default fallback
+        int threshold = 128;
 
         for (int t = 0; t < 256; t++) {
             wB += histogram[t];
@@ -131,134 +151,94 @@ public class ImagePreprocessor {
         return threshold;
     }
 
-    /**
-     * Apply adaptive contrast using Otsu-determined threshold (Sprint 04)
-     * Adjusts contrast based on image brightness characteristics
-     */
     private static BufferedImage adaptiveContrast(BufferedImage gray) {
         int threshold = calculateOtsuThreshold(gray);
 
-        // Calculate adaptive scale factor based on threshold
-        // Images with low threshold (dark) need more boost
-        // Images with high threshold (bright) need less boost
-        float scaleFactor = 1.2f + (128f - threshold) / 256f;
+        float scaleFactor = 1.3f + (128f - threshold) / 200f;
 
-        // Clamp to reasonable range (1.1 - 2.0)
-        scaleFactor = Math.max(1.1f, Math.min(2.0f, scaleFactor));
+        scaleFactor = Math.max(1.2f, Math.min(2.5f, scaleFactor));
 
-        // Safety fallback: if Otsu gives extreme values, use fixed 1.5x
         if (threshold < 30 || threshold > 220) {
-            scaleFactor = 1.5f;
+            scaleFactor = 1.8f;
         }
 
-        RescaleOp rescale = new RescaleOp(scaleFactor, 0, null);
+        float offset = (threshold < 80) ? 20 : 0;
+
+        RescaleOp rescale = new RescaleOp(scaleFactor, offset, null);
         BufferedImage result = new BufferedImage(
                 gray.getWidth(), gray.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
         return rescale.filter(gray, result);
     }
 
-    /**
-     * Resize image to minimum width while maintaining aspect ratio
-     */
     private static BufferedImage resize(BufferedImage image, int minWidth) {
         int targetWidth = Math.max(image.getWidth(), minWidth);
         int targetHeight = (int) ((double) image.getHeight() / image.getWidth() * targetWidth);
 
         BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_BYTE_GRAY);
         Graphics2D g2 = resized.createGraphics();
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g2.drawImage(image, 0, 0, targetWidth, targetHeight, null);
         g2.dispose();
 
         return resized;
     }
 
-    // ========== ROI CROPPING (Sprint 08) ==========
-
-    /**
-     * Crop a region from image using percentage coordinates.
-     * 
-     * @param image     Source image
-     * @param xPct      X position as percentage (0.0-1.0)
-     * @param yPct      Y position as percentage (0.0-1.0)
-     * @param widthPct  Width as percentage (0.0-1.0)
-     * @param heightPct Height as percentage (0.0-1.0)
-     * @return Cropped region as BufferedImage
-     */
     public static BufferedImage cropRegion(BufferedImage image,
             double xPct, double yPct,
             double widthPct, double heightPct) {
         int imgWidth = image.getWidth();
         int imgHeight = image.getHeight();
 
-        // Convert percentages to pixels
         int x = (int) (xPct * imgWidth);
         int y = (int) (yPct * imgHeight);
         int w = (int) (widthPct * imgWidth);
         int h = (int) (heightPct * imgHeight);
 
-        // Clamp to image bounds
         x = Math.max(0, Math.min(x, imgWidth - 1));
         y = Math.max(0, Math.min(y, imgHeight - 1));
         w = Math.min(w, imgWidth - x);
         h = Math.min(h, imgHeight - y);
 
-        // Ensure minimum size
         if (w < 10 || h < 10) {
-            return image; // Return original if crop is too small
+            return image;
         }
 
         return image.getSubimage(x, y, w, h);
     }
 
-    /**
-     * Preprocess a cropped region for OCR.
-     * Uses binarization for best results on isolated text.
-     */
     public static BufferedImage preprocessCroppedRegion(BufferedImage crop) {
-        BufferedImage gray = toGrayscale(crop);
+        BufferedImage upscaled = upscaleIfNeeded(crop, 600);
+        BufferedImage gray = toGrayscale(upscaled);
         BufferedImage sharpened = sharpen(gray);
         BufferedImage binary = binarize(sharpened);
-        return resize(binary, Math.max(crop.getWidth() * 2, 400)); // Upscale for better OCR
+        return binary;
     }
 
-    // ========== MULTI-PASS OCR VARIANTS (Sprint 06) ==========
-
-    /**
-     * Standard preprocessing (same as main preprocess method)
-     */
     public static BufferedImage preprocessStandard(BufferedImage input) {
         return preprocess(input);
     }
 
-    /**
-     * High contrast preprocessing for faded or washed-out text
-     */
     public static BufferedImage preprocessHighContrast(BufferedImage input) {
-        BufferedImage gray = toGrayscale(input);
+        BufferedImage upscaled = upscaleIfNeeded(input, TARGET_WIDTH);
+        BufferedImage gray = toGrayscale(upscaled);
         BufferedImage sharpened = sharpen(gray);
 
-        // Aggressive contrast boost
-        RescaleOp rescale = new RescaleOp(2.0f, -50, null);
+        RescaleOp rescale = new RescaleOp(2.2f, -30, null);
         BufferedImage contrasted = rescale.filter(sharpened, null);
 
-        return resize(contrasted, 1200);
+        return resize(contrasted, TARGET_WIDTH);
     }
 
-    /**
-     * Inverted preprocessing for dark backgrounds or reverse text
-     */
     public static BufferedImage preprocessInverted(BufferedImage input) {
-        BufferedImage gray = toGrayscale(input);
+        BufferedImage upscaled = upscaleIfNeeded(input, TARGET_WIDTH);
+        BufferedImage gray = toGrayscale(upscaled);
         BufferedImage inverted = invert(gray);
         BufferedImage contrasted = adaptiveContrast(inverted);
 
-        return resize(contrasted, 1200);
+        return resize(contrasted, TARGET_WIDTH);
     }
 
-    /**
-     * Invert image colors (for dark backgrounds)
-     */
     private static BufferedImage invert(BufferedImage image) {
         int width = image.getWidth();
         int height = image.getHeight();
@@ -274,12 +254,6 @@ public class ImagePreprocessor {
         return inverted;
     }
 
-    // ========== BINARIZATION (Sprint 08) ==========
-
-    /**
-     * Binarize image to pure black and white using Otsu threshold.
-     * This eliminates colored security patterns from ID cards.
-     */
     private static BufferedImage binarize(BufferedImage gray) {
         int threshold = calculateOtsuThreshold(gray);
         int width = gray.getWidth();
@@ -289,7 +263,6 @@ public class ImagePreprocessor {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int pixel = gray.getRaster().getSample(x, y, 0);
-                // Pixels above threshold become white (255), below become black (0)
                 int value = (pixel > threshold) ? 255 : 0;
                 binary.getRaster().setSample(x, y, 0, value);
             }
@@ -298,28 +271,67 @@ public class ImagePreprocessor {
         return binary;
     }
 
-    /**
-     * Binarized preprocessing for ID cards with colored security patterns.
-     * Converts to pure black/white to eliminate background noise.
-     */
     public static BufferedImage preprocessBinarized(BufferedImage input) {
-        BufferedImage gray = toGrayscale(input);
+        BufferedImage upscaled = upscaleIfNeeded(input, TARGET_WIDTH);
+        BufferedImage gray = toGrayscale(upscaled);
         BufferedImage sharpened = sharpen(gray);
         BufferedImage binary = binarize(sharpened);
 
-        return resize(binary, 1200);
+        return resize(binary, TARGET_WIDTH);
     }
 
-    /**
-     * Aggressive binarization with inverted Otsu (for light text on dark
-     * backgrounds)
-     */
     public static BufferedImage preprocessBinarizedInverted(BufferedImage input) {
-        BufferedImage gray = toGrayscale(input);
+        BufferedImage upscaled = upscaleIfNeeded(input, TARGET_WIDTH);
+        BufferedImage gray = toGrayscale(upscaled);
         BufferedImage sharpened = sharpen(gray);
         BufferedImage binary = binarize(sharpened);
         BufferedImage inverted = invert(binary);
 
-        return resize(inverted, 1200);
+        return resize(inverted, TARGET_WIDTH);
+    }
+
+    public static BufferedImage preprocessAdaptiveLocal(BufferedImage input) {
+        BufferedImage upscaled = upscaleIfNeeded(input, TARGET_WIDTH);
+        BufferedImage gray = toGrayscale(upscaled);
+        BufferedImage sharpened = sharpen(gray);
+        BufferedImage adaptive = adaptiveLocalThreshold(sharpened, 15);
+
+        return resize(adaptive, TARGET_WIDTH);
+    }
+
+    private static BufferedImage adaptiveLocalThreshold(BufferedImage gray, int blockSize) {
+        int width = gray.getWidth();
+        int height = gray.getHeight();
+        BufferedImage result = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+
+        int halfBlock = blockSize / 2;
+        int offset = 10;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int sum = 0;
+                int count = 0;
+
+                for (int dy = -halfBlock; dy <= halfBlock; dy++) {
+                    for (int dx = -halfBlock; dx <= halfBlock; dx++) {
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                            sum += gray.getRaster().getSample(nx, ny, 0);
+                            count++;
+                        }
+                    }
+                }
+
+                int localMean = sum / count;
+                int threshold = localMean - offset;
+
+                int pixel = gray.getRaster().getSample(x, y, 0);
+                int value = (pixel > threshold) ? 255 : 0;
+                result.getRaster().setSample(x, y, 0, value);
+            }
+        }
+
+        return result;
     }
 }

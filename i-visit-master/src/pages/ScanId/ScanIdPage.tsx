@@ -14,6 +14,7 @@ import { registerVisitor, getStationById, type Station } from "../../api/Index";
 import { type ExtractedInfo } from "../../utils/idParsers";
 
 import { cropIdCardFromDataUrl } from "../../utils/cardCropper";
+import { detectCard } from "../../utils/cardDetector";
 import {
   getRoisForIdType,
   cropFieldsFromCard,
@@ -22,6 +23,8 @@ import {
   cleanRoiName,
   extractDobFromText,
   extractNationalIdNumber,
+  extractPhilHealthIdNumber,
+  extractSssIdNumber,
   visionOcrExtract,
 } from "../../utils/ocrFieldHelpers";
 
@@ -158,6 +161,11 @@ export default function ScanIdPage() {
   const [scanning, setScanning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Auto-capture state
+  const [autoCapture, setAutoCapture] = useState(false);
+  const [autoStatus, setAutoStatus] = useState<string>("");
+  const autoCaptureRef = useRef<boolean>(false);
+
   // Ref for camera container (for visual guide overlay)
   const cameraContainerRef = useRef<HTMLDivElement>(null);
 
@@ -201,6 +209,73 @@ export default function ScanIdPage() {
     }
   }, [isVisitorCameraOpen, startVisitorCamera, stopVisitorCamera]);
 
+  // Keep autoCaptureRef in sync with state
+  useEffect(() => {
+    autoCaptureRef.current = autoCapture;
+  }, [autoCapture]);
+
+  // Auto-capture: continuously detect card and trigger scan when ready
+  useEffect(() => {
+    if (!isCameraModalOpen || isFrozen || scanning) return;
+    if (!autoCapture) {
+      setAutoStatus("");
+      return;
+    }
+
+    let cancelled = false;
+    let consecutiveGoodFrames = 0;
+    const REQUIRED_GOOD_FRAMES = 3; // Need 3 consecutive good frames
+
+    const checkFrame = async () => {
+      if (cancelled || !autoCaptureRef.current || isFrozen || scanning) return;
+
+      const frame = captureFrame();
+      if (!frame) {
+        setAutoStatus("📷 Waiting for camera...");
+        return;
+      }
+
+      try {
+        const detection = await detectCard(frame);
+
+        if (detection.detected && detection.confidence > 0.6) {
+          consecutiveGoodFrames++;
+          const progress = Math.min(consecutiveGoodFrames / REQUIRED_GOOD_FRAMES * 100, 100);
+          setAutoStatus(`✅ Card detected! Hold steady... ${Math.round(progress)}%`);
+
+          if (consecutiveGoodFrames >= REQUIRED_GOOD_FRAMES) {
+            setAutoStatus("📸 Capturing...");
+            // Auto-trigger the scan
+            const scanButton = document.getElementById("scan-trigger-btn");
+            if (scanButton) {
+              scanButton.click();
+            }
+            cancelled = true;
+            return;
+          }
+        } else {
+          consecutiveGoodFrames = 0;
+          if (detection.confidence > 0.3) {
+            setAutoStatus("🔍 Move card closer to frame...");
+          } else {
+            setAutoStatus("🔍 Position ID card within the frame");
+          }
+        }
+      } catch (err) {
+        console.error("Auto-capture detection error:", err);
+        setAutoStatus("⚠️ Detection error");
+      }
+    };
+
+    // Check every 500ms
+    const intervalId = setInterval(checkFrame, 500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [isCameraModalOpen, autoCapture, isFrozen, scanning, captureFrame]);
+
   // ID scan + OCR + parsing (ROI + whole-card fallback)
   const handleScanClick = async () => {
     if (scanning) return;
@@ -224,54 +299,75 @@ export default function ScanIdPage() {
     try {
       // 1. Deskew & crop the whole card with OpenCV
       const cropResult = await cropIdCardFromDataUrl(dataUrl);
-      const finalDataUrl =
-        cropResult.success && cropResult.dataUrl ? cropResult.dataUrl : dataUrl;
+      const cardDetected = cropResult.success && cropResult.dataUrl;
+      const finalDataUrl = cardDetected ? cropResult.dataUrl! : dataUrl;
+
+      console.log("[Scan] Card detection:", cardDetected ? "SUCCESS" : "FAILED (using original image)");
 
       // Show what OCR will actually see
       setScanPreview(finalDataUrl);
       setCroppedPreview(finalDataUrl);
 
-      // 2. Get ROIs for the selected ID type and crop per-field images
-      const rois = getRoisForIdType(selectedIdType);
-      const fieldImages = await cropFieldsFromCard(finalDataUrl, rois);
+      // 2. Try AI Vision OCR FIRST (most accurate, doesn't need ROI)
+      console.log("[Scan] Trying Vision OCR...");
+      const visionResult = await visionOcrExtract(finalDataUrl);
+      console.log("[Scan] Vision OCR:", visionResult.success ? "SUCCESS" : "FAILED");
 
       let roiFullName = "";
       let roiDob = "";
       let roiIdNumber = "";
 
-      // 3. OCR each ROI via helper (Tess4J)
-      if (fieldImages.fullName) {
-        const text = await ocrDataUrlViaHelper(fieldImages.fullName);
-        roiFullName = cleanRoiName(text);
-      }
+      // 3. Only use ROI if card was detected AND Vision failed
+      // ROI on uncropped image gives garbage results
+      if (cardDetected && !visionResult.success) {
+        console.log("[Scan] Using ROI cropping on detected card...");
+        const rois = getRoisForIdType(selectedIdType);
+        const fieldImages = await cropFieldsFromCard(finalDataUrl, rois);
 
-      if (fieldImages.dob) {
-        const text = await ocrDataUrlViaHelper(fieldImages.dob);
-        roiDob = extractDobFromText(text);
-      }
+        // OCR each ROI via helper (Tess4J)
+        if (fieldImages.fullName) {
+          const text = await ocrDataUrlViaHelper(fieldImages.fullName);
+          roiFullName = cleanRoiName(text);
+        }
 
-      if (fieldImages.idNumber) {
-        const text = await ocrDataUrlViaHelper(fieldImages.idNumber);
-        roiIdNumber = extractNationalIdNumber(text) || text.trim();
+        if (fieldImages.dob) {
+          const text = await ocrDataUrlViaHelper(fieldImages.dob);
+          roiDob = extractDobFromText(text);
+        }
+
+        if (fieldImages.idNumber) {
+          const text = await ocrDataUrlViaHelper(fieldImages.idNumber);
+          // Use ID-type-specific parsing
+          if (selectedIdType === "PhilHealth ID") {
+            roiIdNumber = extractPhilHealthIdNumber(text);
+          } else if (selectedIdType === "SSS ID") {
+            roiIdNumber = extractSssIdNumber(text);
+          } else {
+            roiIdNumber = extractNationalIdNumber(text) || text.trim();
+          }
+        }
+      } else if (!visionResult.success) {
+        console.log("[Scan] Card detection failed & Vision failed - using full-image OCR only");
       }
 
       const roiHasAnyData = !!roiFullName || !!roiDob || !!roiIdNumber;
 
-      // 4. Run full-card OCR as a backup / merger source
-      const parsedFromFull = await runWholeCardOcrAndParse(
-        finalDataUrl,
-        selectedIdType
-      );
-
-      const fromFull: ExtractedInfo = parsedFromFull ?? {
+      // 4. Run full-card OCR as backup (only if Vision failed)
+      let fromFull: ExtractedInfo = {
         fullName: "",
         dob: "",
         idNumber: "",
         idType: selectedIdType || "Unknown",
       };
 
-      // 4.5 Try AI Vision OCR for highest accuracy (OpenRouter)
-      const visionResult = await visionOcrExtract(finalDataUrl);
+      if (!visionResult.success) {
+        console.log("[Scan] Running full-card Tesseract OCR...");
+        const parsedFromFull = await runWholeCardOcrAndParse(
+          finalDataUrl,
+          selectedIdType
+        );
+        fromFull = parsedFromFull ?? fromFull;
+      }
 
       // 5. Merge ROI + full-card + Vision results (Vision takes priority if successful)
       function isReasonableName(candidate: string): boolean {
@@ -918,31 +1014,54 @@ export default function ScanIdPage() {
             <img
               src={scanPreview}
               alt="Captured ID frame"
-              className="w-full max-w-md rounded-lg"
+              className="w-full rounded-lg"
             />
           ) : (
-            <div ref={cameraContainerRef} className="relative w-full max-w-md">
+            <div ref={cameraContainerRef} className="relative w-full">
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 className="w-full rounded-lg"
               />
-              <ScanGuideOverlay containerRef={cameraContainerRef} />
+              <ScanGuideOverlay containerRef={cameraContainerRef} idType={selectedIdType} />
             </div>
           )}
 
           <p className="text-xs text-gray-400 text-center">
-            Align the ID card within the yellow guide for best results.
+            {selectedIdType
+              ? `Align your ${selectedIdType} so fields match the colored regions.`
+              : 'Select an ID type for field-specific alignment guides, or scan anyway for auto-detection.'}
           </p>
 
+          {/* Auto-capture toggle */}
+          <div className="flex items-center gap-3 mt-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoCapture}
+                onChange={(e) => setAutoCapture(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-yellow-500"
+              />
+              <span className="text-sm text-gray-300">Auto-capture when card detected</span>
+            </label>
+          </div>
+
+          {/* Auto-capture status */}
+          {autoCapture && autoStatus && (
+            <p className="text-sm text-yellow-400 text-center animate-pulse">
+              {autoStatus}
+            </p>
+          )}
+
           <Button
+            id="scan-trigger-btn"
             variation="primary"
             onClick={handleScanClick}
             disabled={scanning}
             className={scanning ? "opacity-60 cursor-not-allowed" : ""}
           >
-            {scanning ? "Scanning..." : "Scan"}
+            {scanning ? "Scanning..." : "📸 Scan"}
           </Button>
         </div>
       </Modal>

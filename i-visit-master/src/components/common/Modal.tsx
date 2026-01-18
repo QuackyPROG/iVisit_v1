@@ -17,7 +17,7 @@ export default function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-dark-gray rounded-lg shadow-lg w-full max-w-2xl p-6 relative">
+      <div className="bg-dark-gray rounded-lg shadow-lg w-full max-w-4xl p-6 relative">
         <div className="flex justify-between mb-4 items-center">
           {title && <h2 className="text-lg font-semibold">{title}</h2>}
           <button

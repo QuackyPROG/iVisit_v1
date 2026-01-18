@@ -24,9 +24,11 @@ public class OcrController {
         this.tesseract = new Tesseract();
         this.tesseract.setDatapath(dataPath);
         this.tesseract.setLanguage("eng");
+        // Set DPI for better OCR (prevents "Invalid resolution 0 dpi" warning)
+        this.tesseract.setTessVariable("user_defined_dpi", "300");
         this.tesseract.setTessVariable(
                 "tessedit_char_whitelist",
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890- /");
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890- /,.");
     }
 
     @PostMapping
@@ -85,19 +87,12 @@ public class OcrController {
 
         List<OcrResult> results = new ArrayList<>();
 
-        // Pass 1: Standard preprocessing
         results.add(runOcr(ImagePreprocessor.preprocessStandard(original), "standard"));
-
-        // Pass 2: High contrast for faded text
         results.add(runOcr(ImagePreprocessor.preprocessHighContrast(original), "highContrast"));
-
-        // Pass 3: Inverted for dark backgrounds
         results.add(runOcr(ImagePreprocessor.preprocessInverted(original), "inverted"));
-
-        // Pass 4: Binarized (pure black/white) to eliminate colored security patterns
         results.add(runOcr(ImagePreprocessor.preprocessBinarized(original), "binarized"));
+        results.add(runOcr(ImagePreprocessor.preprocessAdaptiveLocal(original), "adaptiveLocal"));
 
-        // Select the best result
         OcrResult best = selectBest(results);
 
         Map<String, Object> response = new HashMap<>();
@@ -105,13 +100,13 @@ public class OcrController {
         response.put("method", best.method);
         response.put("score", best.score);
 
-        System.out.println("Helper OCR (multipass): best method = " + best.method + ", score = " + best.score);
+        System.out.println("Helper OCR (multipass): tried " + results.size() + " methods");
+        System.out.println("  - Best method: " + best.method + ", score: " + best.score);
+        System.out.println("  - Text preview: "
+                + (best.text.length() > 100 ? best.text.substring(0, 100) + "..." : best.text).replace("\n", " "));
         return ResponseEntity.ok(response);
     }
 
-    /**
-     * Run OCR with a specific preprocessing method
-     */
     private OcrResult runOcr(BufferedImage image, String method) {
         try {
             String text = tesseract.doOCR(image);
@@ -122,29 +117,18 @@ public class OcrController {
         }
     }
 
-    /**
-     * Score OCR result based on quality heuristics
-     * Higher score = better result
-     */
     private int scoreResult(String text) {
         if (text == null || text.isEmpty())
             return 0;
 
-        // Count alphanumeric characters (actual content)
         long alphaNum = text.chars().filter(Character::isLetterOrDigit).count();
 
-        // Penalize garbage/noise characters
         long garbage = text.chars()
                 .filter(c -> !Character.isLetterOrDigit(c) && !Character.isWhitespace(c) && c != '-' && c != '/')
                 .count();
-
-        // Prefer results with more content and less noise
         return (int) (alphaNum - garbage * 2);
     }
 
-    /**
-     * Select the best OCR result from multiple passes
-     */
     private OcrResult selectBest(List<OcrResult> results) {
         return results.stream()
                 .max(Comparator.comparingInt(r -> r.score))
@@ -157,9 +141,6 @@ public class OcrController {
         return ResponseEntity.status(status).body(body);
     }
 
-    /**
-     * Internal class to hold OCR result with metadata
-     */
     private static class OcrResult {
         final String text;
         final String method;

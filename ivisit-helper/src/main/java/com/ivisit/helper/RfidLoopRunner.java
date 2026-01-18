@@ -16,6 +16,9 @@ public class RfidLoopRunner implements CommandLineRunner {
     // tracking consecutive scanner-level failures
     private int consecutiveScannerErrors = 0;
 
+    // Flag to track if we've already notified about missing reader
+    private boolean noReaderNotified = false;
+
     public RfidLoopRunner(RfidService rfidService, RfidSender rfidSender) {
         this.rfidService = rfidService;
         this.rfidSender = rfidSender;
@@ -27,41 +30,44 @@ public class RfidLoopRunner implements CommandLineRunner {
 
         while (true) {
             try {
-                System.out.println("Waiting for card...");
+                if (!noReaderNotified) {
+                    // Only log "Waiting for card..." when reader is available
+                    System.out.println("Waiting for card...");
+                }
                 String uid = rfidService.readCardUID(10_000); // 10 seconds
 
                 if (uid != null) {
                     System.out.println("Card detected. UID = " + uid);
                     rfidSender.sendScan(uid);
 
-                    // SUCCESS -> reset error counter
+                    // SUCCESS -> reset error counter and notification flag
                     consecutiveScannerErrors = 0;
+                    noReaderNotified = false;
                 } else {
-                    System.out.println("No UID read (possibly unsupported card).");
-
                     // "No card" is not a scanner failure; also reset the counter
                     consecutiveScannerErrors = 0;
+                    noReaderNotified = false;
                 }
             } catch (Exception e) {
                 String msg = e.getMessage();
-                System.err.println("Error reading card: " + msg);
 
                 if (isScannerFatalError(e)) {
                     consecutiveScannerErrors++;
-                    System.err.println(
-                            "[RFID] Scanner error " + consecutiveScannerErrors + "/5: " + safeMessage(msg));
 
-                    if (consecutiveScannerErrors >= 5) {
-                        System.err.println(
-                                "[RFID] No RFID reader detected after 5 attempts. " +
-                                        "Will retry in 30 seconds. OCR remains available.");
-                        // Don't exit - just sleep and reset counter so OCR keeps working
+                    if (consecutiveScannerErrors >= 5 && !noReaderNotified) {
+                        // Only log this ONCE when no reader detected
+                        System.out.println(
+                                "[RFID] No RFID reader detected. OCR remains available. (Will auto-reconnect when plugged in)");
+                        noReaderNotified = true;
                         consecutiveScannerErrors = 0;
-                        Thread.sleep(30_000); // Wait 30 seconds before retrying
-                        continue;
                     }
+
+                    // Sleep longer when no reader to reduce CPU usage
+                    Thread.sleep(noReaderNotified ? 10_000 : 1000);
+                    continue;
                 } else {
-                    // Non-scanner error -> don't count towards restart
+                    // Non-scanner error -> log it
+                    System.err.println("Error reading card: " + msg);
                     consecutiveScannerErrors = 0;
                 }
             }

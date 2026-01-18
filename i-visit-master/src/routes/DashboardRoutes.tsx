@@ -20,17 +20,15 @@ export interface DashboardRoute {
   element: React.ReactNode;
 }
 
-// Debug routes (only visible when VITE_OCR_DEBUG_MODE=true)
-const debugRoutes: DashboardRoute[] = import.meta.env.VITE_OCR_DEBUG_MODE === 'true'
-  ? [
-    {
-      type: [] as Role[],
-      label: 'OCR Test',
-      path: '/dashboard/ocr-test',
-      element: <OcrTestPage />,
-    },
-  ]
-  : [];
+// OCR Test route - available to guards for testing OCR functionality
+const ocrTestRoutes: DashboardRoute[] = [
+  {
+    type: ['guard'] as Role[],
+    label: 'OCR Test',
+    path: '/dashboard/ocr-test',
+    element: <OcrTestPage />,
+  },
+];
 
 const dashboardRoutes: DashboardRoute[] = [
   {
@@ -99,8 +97,8 @@ const dashboardRoutes: DashboardRoute[] = [
     path: '/dashboard/device-settings',
     element: <DeviceSettings />,
   },
-  // Add debug routes at the end
-  ...debugRoutes,
+  // Add OCR test routes at the end
+  ...ocrTestRoutes,
 ];
 export default dashboardRoutes;
 

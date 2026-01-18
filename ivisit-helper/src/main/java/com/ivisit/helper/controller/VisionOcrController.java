@@ -31,9 +31,6 @@ public class VisionOcrController {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
-    /**
-     * Extract ID information using AI vision
-     */
     @PostMapping("/vision")
     public ResponseEntity<Map<String, Object>> extractWithVision(
             @RequestParam("file") MultipartFile file) {
@@ -42,11 +39,9 @@ public class VisionOcrController {
         }
 
         try {
-            // Convert image to base64
             String base64Image = encodeImageToBase64(file);
             String mimeType = file.getContentType() != null ? file.getContentType() : "image/jpeg";
 
-            // Build the prompt for ID extraction (including gender)
             String prompt = "Analyze this Philippine ID card image and extract the following information. " +
                     "Return ONLY a JSON object with these exact fields (use empty string if not found): " +
                     "{ \"fullName\": \"extracted full name\", \"idNumber\": \"extracted ID number\", " +
@@ -58,7 +53,6 @@ public class VisionOcrController {
                     "For gender, look for SEX field or M/F indicator and return 'Male' or 'Female'. " +
                     "Extract the ID/License number exactly as shown. Only return the JSON, no other text.";
 
-            // Call OpenRouter API
             Map<String, Object> response = callOpenRouterVision(base64Image, mimeType, prompt);
 
             System.out.println("Vision OCR: extracted fields from image");
@@ -71,35 +65,25 @@ public class VisionOcrController {
         }
     }
 
-    /**
-     * Encode image file to base64 string
-     */
     private String encodeImageToBase64(MultipartFile file) throws IOException {
         byte[] bytes = file.getBytes();
         return Base64.getEncoder().encodeToString(bytes);
     }
 
-    /**
-     * Call OpenRouter API with vision request
-     */
     private Map<String, Object> callOpenRouterVision(String base64Image, String mimeType, String prompt) {
-        // Build request headers
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
         headers.set("HTTP-Referer", "https://ivisitust.com");
         headers.set("X-Title", "iVisit ID Scanner");
 
-        // Build message content with image
         List<Map<String, Object>> messageContent = new ArrayList<>();
 
-        // Add text part
         Map<String, Object> textPart = new HashMap<>();
         textPart.put("type", "text");
         textPart.put("text", prompt);
         messageContent.add(textPart);
 
-        // Add image part
         Map<String, Object> imagePart = new HashMap<>();
         imagePart.put("type", "image_url");
         Map<String, String> imageUrl = new HashMap<>();
@@ -107,14 +91,12 @@ public class VisionOcrController {
         imagePart.put("image_url", imageUrl);
         messageContent.add(imagePart);
 
-        // Build messages array
         List<Map<String, Object>> messages = new ArrayList<>();
         Map<String, Object> userMessage = new HashMap<>();
         userMessage.put("role", "user");
         userMessage.put("content", messageContent);
         messages.add(userMessage);
 
-        // Build request body
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("model", model);
         requestBody.put("messages", messages);
@@ -122,10 +104,8 @@ public class VisionOcrController {
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
-        // Make API call
         ResponseEntity<Map> apiResponse = restTemplate.postForEntity(apiUrl, request, Map.class);
 
-        // Parse response
         Map<String, Object> result = new HashMap<>();
         result.put("method", "vision");
         result.put("model", model);
@@ -137,13 +117,11 @@ public class VisionOcrController {
                     Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
                     String content = (String) message.get("content");
 
-                    // Try to parse JSON from response
                     result.put("rawResponse", content);
 
                     // Extract JSON from response (handle markdown code blocks)
                     String jsonStr = extractJson(content);
                     if (jsonStr != null) {
-                        // Parse the JSON manually (simple approach)
                         result.put("fields", parseSimpleJson(jsonStr));
                     }
                 }

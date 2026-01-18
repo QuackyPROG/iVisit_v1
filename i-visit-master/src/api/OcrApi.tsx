@@ -11,7 +11,8 @@ export async function extractText(file: File): Promise<ExtractedInfoResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${HELPER_BASE_URL}/api/ocr`, {
+  // Use multipass OCR for best accuracy (tries multiple preprocessing methods)
+  const res = await fetch(`${HELPER_BASE_URL}/api/ocr/multipass`, {
     method: "POST",
     body: formData,
   });

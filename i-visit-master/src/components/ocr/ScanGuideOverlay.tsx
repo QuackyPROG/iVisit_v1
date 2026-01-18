@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react';
+import { getTemplateForIdType, type RoiSpec } from '../../utils/cardTemplates';
 
 interface ScanGuideOverlayProps {
     containerRef: React.RefObject<HTMLDivElement | null>;
+    idType?: string;  // Pass selected ID type to show specific ROI regions
 }
 
+// Color mapping for different ROI field types
+const ROI_COLORS: Record<string, string> = {
+    fullName: '#00BFFF',    // Cyan/DeepSkyBlue
+    idNumber: '#FF00FF',    // Magenta
+    dob: '#FFD700',         // Gold
+    institution: '#00FF7F', // SpringGreen
+    faculty: '#FF6347',     // Tomato
+};
+
 /**
- * Visual scanning guide overlay for ID card alignment (Sprint 05)
- * Shows a card-shaped guide with corner markers to help users position IDs correctly
+ * Visual scanning guide overlay for ID card alignment (Enhanced with ID-specific ROIs)
+ * Shows a card-shaped guide with corner markers and field-specific ROI regions
  */
-export default function ScanGuideOverlay({ containerRef }: ScanGuideOverlayProps) {
+export default function ScanGuideOverlay({ containerRef, idType }: ScanGuideOverlayProps) {
     const [dimensions, setDimensions] = useState({ width: 640, height: 480 });
 
     useEffect(() => {
@@ -39,13 +50,13 @@ export default function ScanGuideOverlay({ containerRef }: ScanGuideOverlayProps
     // ID card aspect ratio (ISO/IEC 7810 ID-1: 85.60mm × 53.98mm ≈ 1.586)
     const cardAspect = 1.586;
 
-    // Calculate guide dimensions (75% of view width, max height considered)
-    let guideWidth = width * 0.75;
+    // Calculate guide dimensions (88% of view width for larger ID area)
+    let guideWidth = width * 0.88;
     let guideHeight = guideWidth / cardAspect;
 
     // If guide is too tall for the view, constrain by height instead
-    if (guideHeight > height * 0.7) {
-        guideHeight = height * 0.7;
+    if (guideHeight > height * 0.85) {
+        guideHeight = height * 0.85;
         guideWidth = guideHeight * cardAspect;
     }
 
@@ -56,6 +67,18 @@ export default function ScanGuideOverlay({ containerRef }: ScanGuideOverlayProps
     // Corner marker size (proportional to guide size)
     const cornerSize = Math.min(guideWidth, guideHeight) * 0.1;
     const strokeWidth = 3;
+
+    // Get ROI template for the selected ID type
+    const template = idType ? getTemplateForIdType(idType) : null;
+    const rois: RoiSpec[] = template?.rois || [];
+
+    // Helper to convert ROI normalized coords to SVG coords (relative to card guide)
+    const roiToSvg = (roi: RoiSpec) => ({
+        rx: x + roi.x * guideWidth,
+        ry: y + roi.y * guideHeight,
+        rw: roi.width * guideWidth,
+        rh: roi.height * guideHeight,
+    });
 
     return (
         <svg
@@ -97,6 +120,40 @@ export default function ScanGuideOverlay({ containerRef }: ScanGuideOverlayProps
                 strokeDasharray="8,4"
                 rx="8"
             />
+
+            {/* ROI Field Regions - Rendered inside the card guide */}
+            {rois.map((roi) => {
+                const { rx, ry, rw, rh } = roiToSvg(roi);
+                const color = ROI_COLORS[roi.key] || '#FFFFFF';
+
+                return (
+                    <g key={roi.key}>
+                        {/* ROI Rectangle */}
+                        <rect
+                            x={rx}
+                            y={ry}
+                            width={rw}
+                            height={rh}
+                            fill={`${color}15`}  // 15 = ~8% opacity
+                            stroke={color}
+                            strokeWidth={2}
+                            strokeDasharray="4,2"
+                            rx="4"
+                        />
+                        {/* ROI Label */}
+                        <text
+                            x={rx + 4}
+                            y={ry + 14}
+                            fill={color}
+                            fontSize="11"
+                            fontWeight="600"
+                            style={{ textShadow: '0 1px 2px rgba(0,0,0,0.9)' }}
+                        >
+                            {roi.label}
+                        </text>
+                    </g>
+                );
+            })}
 
             {/* Corner markers (green solid) */}
             {/* Top-left */}
@@ -142,7 +199,9 @@ export default function ScanGuideOverlay({ containerRef }: ScanGuideOverlayProps
                 fontWeight="bold"
                 style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}
             >
-                Position ID card within the frame
+                {idType && template
+                    ? `Align ${template.displayName} within the frame`
+                    : 'Position ID card within the frame'}
             </text>
         </svg>
     );
