@@ -240,6 +240,11 @@ public class OcrSpaceController {
                         !trimmed.contains("PHL") &&
                         !trimmed.contains("PSN") &&
                         !trimmed.contains("SAMPLE") &&
+                        !trimmed.contains("PROUD") &&
+                        !trimmed.contains("FILIPINO") &&
+                        !trimmed.contains("SSS") &&
+                        !trimmed.contains("CORAZON") &&
+                        !trimmed.contains("MEMBER") &&
                         trimmed.length() > 2) {
                     if (nameBuilder.length() > 0) {
                         nameBuilder.append(" ");

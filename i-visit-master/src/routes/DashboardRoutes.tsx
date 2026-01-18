@@ -9,7 +9,7 @@ import LogVisitor from '../pages/LogVisitor/LogVisitor';
 import ManagePasses from '../pages/ManagePasses/ManagePasses';
 import ArchiveCenter from '../pages/ArchiveCenter/ArchiveCenter';
 import DeviceSettings from '../pages/DeviceSettings/DeviceSettings';
-import OcrTestPage from '../pages/OcrTest/OcrTestPage';
+import RoiEditorPage from '../pages/Settings/RoiEditorPage';
 
 type Role = "admin" | "guard" | "support";
 
@@ -19,16 +19,6 @@ export interface DashboardRoute {
   path: string;
   element: React.ReactNode;
 }
-
-// OCR Test route - available to guards for testing OCR functionality
-const ocrTestRoutes: DashboardRoute[] = [
-  {
-    type: ['guard'] as Role[],
-    label: 'OCR Test',
-    path: '/dashboard/ocr-test',
-    element: <OcrTestPage />,
-  },
-];
 
 const dashboardRoutes: DashboardRoute[] = [
   {
@@ -97,8 +87,11 @@ const dashboardRoutes: DashboardRoute[] = [
     path: '/dashboard/device-settings',
     element: <DeviceSettings />,
   },
-  // Add OCR test routes at the end
-  ...ocrTestRoutes,
+  {
+    type: ['admin'],
+    label: 'ROI Editor',
+    path: '/dashboard/roi-editor',
+    element: <RoiEditorPage />,
+  },
 ];
 export default dashboardRoutes;
-

@@ -1,5 +1,5 @@
 import { extractText } from "../api/Index";
-import { getTemplateForIdType } from "./cardTemplates";
+import { getTemplateWithCustomRois } from "./cardTemplates";
 
 import {
   parseTextByIdType,
@@ -249,10 +249,9 @@ export async function ocrDataUrlViaHelper(dataUrl: string): Promise<string> {
 }
 
 export function getRoisForIdType(idType: string): FieldRoi[] {
-  const tpl = getTemplateForIdType(idType);
+  const tpl = getTemplateWithCustomRois(idType);
   if (!tpl || !tpl.rois || tpl.rois.length === 0) return [];
 
-  // Adapt RoiSpec to FieldRoi (they're effectively the same shape)
   return tpl.rois.map((r) => ({
     key: r.key as IdFieldKey,
     x: r.x,

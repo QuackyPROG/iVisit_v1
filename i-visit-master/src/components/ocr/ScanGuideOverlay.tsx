@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getTemplateForIdType, type RoiSpec } from '../../utils/cardTemplates';
+import { getTemplateWithCustomRois, type RoiSpec } from '../../utils/cardTemplates';
 
 interface ScanGuideOverlayProps {
     containerRef: React.RefObject<HTMLDivElement | null>;
@@ -69,7 +69,7 @@ export default function ScanGuideOverlay({ containerRef, idType }: ScanGuideOver
     const strokeWidth = 3;
 
     // Get ROI template for the selected ID type
-    const template = idType ? getTemplateForIdType(idType) : null;
+    const template = idType ? getTemplateWithCustomRois(idType) : null;
     const rois: RoiSpec[] = template?.rois || [];
 
     // Helper to convert ROI normalized coords to SVG coords (relative to card guide)

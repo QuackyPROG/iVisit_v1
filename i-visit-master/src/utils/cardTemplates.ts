@@ -233,6 +233,7 @@ const TEMPLATES: CardTemplate[] = [
 
 /**
  * Get the template (if any) for the currently selected ID type.
+ * Returns the default template from TEMPLATES array.
  */
 export function getTemplateForIdType(idType: string | null | undefined): CardTemplate | null {
   if (!idType) return null;
@@ -240,3 +241,29 @@ export function getTemplateForIdType(idType: string | null | undefined): CardTem
   return tpl || null;
 }
 
+/**
+ * Get template with custom ROIs merged if they exist.
+ * Checks localStorage for user-customized ROIs first.
+ */
+export function getTemplateWithCustomRois(idType: string | null | undefined): CardTemplate | null {
+  if (!idType) return null;
+
+  const template = getTemplateForIdType(idType);
+  if (!template) return null;
+
+  const storageKey = `ivisit-custom-rois-${idType.replace(/\s+/g, '-').toLowerCase()}`;
+  const stored = localStorage.getItem(storageKey);
+
+  if (stored) {
+    try {
+      const custom = JSON.parse(stored);
+      if (custom.rois && custom.rois.length > 0) {
+        return { ...template, rois: custom.rois };
+      }
+    } catch {
+      // Invalid JSON, use defaults
+    }
+  }
+
+  return template;
+}

@@ -770,6 +770,15 @@ export default function ScanIdPage() {
     stopVisitorCamera();
   };
 
+  // Require ID type selection before opening camera
+  const handleOpenCamera = () => {
+    if (!selectedIdType) {
+      showToast("Please select an ID type first.", { variant: "warning" });
+      return;
+    }
+    setIsCameraModalOpen(true);
+  };
+
   return (
     <DashboardLayout>
       {/* Header + controls */}
@@ -798,7 +807,7 @@ export default function ScanIdPage() {
               </Button>
               <Button
                 variation="primary"
-                onClick={() => setIsCameraModalOpen(true)}
+                onClick={handleOpenCamera}
                 disabled={scanning}
               >
                 Open Camera
@@ -819,7 +828,7 @@ export default function ScanIdPage() {
           <div className="mt-4 flex md:hidden gap-3">
             <Button
               variation="primary"
-              onClick={() => setIsCameraModalOpen(true)}
+              onClick={handleOpenCamera}
               disabled={scanning}
             >
               Open Camera
