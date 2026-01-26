@@ -29,6 +29,9 @@ public class VisionOcrController {
     @Value("${openrouter.model}")
     private String model;
 
+    @Value("${app.http.referer:https://ivisitust.com}")
+    private String httpReferer;
+
     private final RestTemplate restTemplate = new RestTemplate();
 
     @PostMapping("/vision")
@@ -74,7 +77,7 @@ public class VisionOcrController {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + apiKey);
-        headers.set("HTTP-Referer", "https://ivisitust.com");
+        headers.set("HTTP-Referer", httpReferer);
         headers.set("X-Title", "iVisit ID Scanner");
 
         List<Map<String, Object>> messageContent = new ArrayList<>();

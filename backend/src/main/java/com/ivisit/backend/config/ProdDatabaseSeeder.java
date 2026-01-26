@@ -4,6 +4,7 @@ import com.ivisit.backend.model.Station;
 import com.ivisit.backend.model.UserAccount;
 import com.ivisit.backend.repository.StationRepository;
 import com.ivisit.backend.repository.UserAccountRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +17,15 @@ import java.util.Collections;
 @Configuration
 @Profile("prod")
 public class ProdDatabaseSeeder {
+
+    @Value("${app.admin.email:ivisitust2025@gmail.com}")
+    private String adminEmail;
+
+    @Value("${app.admin.password:ChangeMe123!}")
+    private String adminPassword;
+
+    @Value("${app.admin.username:iVisitUST 2025}")
+    private String adminUsername;
 
     @Bean
     public CommandLineRunner seedProdDatabase(
@@ -34,16 +44,17 @@ public class ProdDatabaseSeeder {
             Station mainGate = new Station("Main Gate", "GATE", true);
             stationRepository.save(mainGate);
 
-            // Temporary admin account for initial takeover by the client
+            // Admin account for initial takeover by the client
+            // Credentials are now configurable via environment variables
             UserAccount tempAdmin = new UserAccount(
-                    "iVisitUST 2025",              // username
-                    null,                      // password (set encoded below)
-                    "ivisitust2025@gmail.com",  // email (change as needed)
-                    "ADMIN",                   // account type
+                    adminUsername,                 // username from env
+                    null,                          // password (set encoded below)
+                    adminEmail,                    // email from env
+                    "ADMIN",                       // account type
                     Collections.singletonList(mainGate) // assigned station(s)
             );
 
-            tempAdmin.setPassword(passwordEncoder.encode("ChangeMe123!"));
+            tempAdmin.setPassword(passwordEncoder.encode(adminPassword));
             tempAdmin.setActive(true);
             tempAdmin.setEmailVerified(Boolean.TRUE);
             tempAdmin.setEmailVerifiedAt(new Timestamp(System.currentTimeMillis()));
